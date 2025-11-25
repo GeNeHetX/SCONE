@@ -1,0 +1,14 @@
+SCONE
+Single-Cell Omics Navigation & Exploration
+
+1) Create Obj button puis affichage QC et selection seuil (avec table de comptage des cellules outliers)
+2) Tutorial ajouter un schéma et changer louvain par Leiden 
+3) Ameliorer les couleurs et la tailles des labels dans le UMAP
+4) Retirer les variable quantitative pour plot que par label le umap metadata
+5) Ajouter metadata par match sampleID car dans barcode (si curated bien)
+5bis) Violin proposer une liste de gene 
+6) Dotplot de wish a ameliorer (proposer liste de gene )
+7) pouvoir safe en RDS l'obj et le reupload 
+
+8) FindMarkers changer la selection cluster vs rest + print table
+9) Annotate Cluster manual + proposer un score via sctype et notre lsite de markers
