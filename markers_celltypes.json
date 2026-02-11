@@ -1,0 +1,26 @@
+{
+    "epithelial": [
+      "TFF1", "GATA6", "CLDN18", "MUC16", "S100A2", "KRT7", "KRT17", "KRT19",
+      "EPCAM", "MSLN", "MUC1", "TACSTD2", "LGALS4", "KRT8", "KRT18"
+    ],
+    "fibroblast": [
+      "ACTA2", "VIM", "COL6A1", "COL6A2", "COL1A1", "COL1A2", "COL3A1",
+      "TAGLN", "FAP", "PDGFRB", "THY1", "LUM", "DCN", "CXCL12"
+    ],
+    "prolif": [
+      "MKI67", "TOP2A", "PCNA", "BIRC5", "UBE2C", "CENPF", "MCM2", "MCM5"
+    ],
+    "immune": [
+      "CD3D", "CD3E", "CD4", "CD8A", "CD8B", "CD163", "CD68", "PTPRC", "MS4A1"
+    ],
+    "acinar": [
+      "PRSS1", "PRSS2", "CELA3A", "CELA3B", "CPA1", "CPA2", "REG1A", "REG1B",
+      "GP2", "PNLIP", "CTRB1", "CTRB2"
+    ],
+    "endothelial": [
+      "PECAM1", "VWF", "KDR", "ENG", "PLVAP", "EMCN", "ESAM"
+    ],
+    "hepatocytes": [
+      "ALB", "APOA1", "APOA2", "TTR", "FGB", "FGA", "SERPINA1", "CYP3A4", "CYP2E1"
+    ]
+  }

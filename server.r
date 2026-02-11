@@ -144,6 +144,11 @@ output$tutorial_content <- renderUI({
     ")
     })
 
+  observeEvent(input$show_tutorial, {
+    shinyjs::toggle("tutorial_panel")
+
+  })
+
   # -------------------------
   # Main Seurat pipeline
   # -------------------------
@@ -205,8 +210,8 @@ output$tutorial_content <- renderUI({
         }
 
         output$qc_violin <- renderPlot({
-            VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
-                    pt.size = 0.1) + ggtitle("QC Metrics")
+            p <- VlnPlot(seu, features = "nFeature_RNA",  pt.size = 0.1 )
+            print(p)
         })
 
         output$qc_scatter1 <- renderPlot({

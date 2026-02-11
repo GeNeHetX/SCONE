@@ -21,6 +21,10 @@ ui <- dashboardPage(
     title = tags$span(
       tags$span("SCONE", style = "font-family:'Arial'; font-weight:bold;"), tags$img( src = "logo.jpg", height = "60px", style ="margin-left:100px; margin-top:-1px;" ), 
       style = "display:flex; align-items:center;" 
+    ),
+    tags$li(
+      class = "dropdown header-menu-left",
+      actionLink("show_tutorial", "Tutorial", icon = icon("book-open"))
     )
   ),
   
@@ -59,7 +63,7 @@ ui <- dashboardPage(
     verbatimTextOutput("status", placeholder = TRUE),
 
     tags$hr(),
-    p(style="font-size:12px;color:#555;", "SCONE — Single-Cell Omics Navigation & Exploration")
+    p(style="font-size:12px;color:#555;", "SCONE © — Single-Cell Omics Navigation & Exploration \n please cite authors : Camille Pignolet (GeNeHetX Team, INSERM, 2026)")
   ),
 
   ## ---------------- Body (CSS moved here) ----------------
@@ -202,18 +206,36 @@ ui <- dashboardPage(
 
     ", header_text, header_bg, header_text, box_dark, box_accent)))
   ),
+      div(
+      id = "tutorial_panel",
+      style = "display:none;",   # caché par défaut
+      fluidRow(
+        column(12,
+          box(
+            width = 12,
+            status = "info",
+            solidHeader = TRUE,
+            title = "Tutorial",
+            htmlOutput("tutorial_content")
+          )
+        )
+      )
+    ),
+
+
+  ### Analysis
 
    fluidRow(
       column(12,
              tabBox(
                width = 12, id = "tabs",
-               tabPanel("Tutorial",
-                        fluidRow(
-                            column(width = 12,
-                            htmlOutput("tutorial_content")
-                            )
-                        )
-                ),
+              #  tabPanel("Tutorial",
+              #           fluidRow(
+              #               column(width = 12,
+              #               htmlOutput("tutorial_content")
+              #               )
+              #           )
+              #   ),
                tabPanel("QC Metrics",
                         fluidRow(
                             box(width = 12, status = "info", solidHeader = TRUE,
