@@ -1,3 +1,23 @@
+packages <- c(
+  "shiny", "shinydashboard", "shinycssloaders", "magrittr", "shinyjs",
+  "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT"
+)
+new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
+if(length(new_packages)) {
+  # Bioconductor manager pour certains packages si nécessaire
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+  }
+  for(pkg in new_packages) {
+    # Certains packages sont sur CRAN, d'autres sur Bioconductor
+    if(pkg %in% c("Seurat", "Matrix")) {
+      install.packages(pkg, dependencies = TRUE)
+    } else {
+      install.packages(pkg, dependencies = TRUE)
+    }
+  }
+}
+
 library(shiny)
 library(shinydashboard)
 library(Seurat)
