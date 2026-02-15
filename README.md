@@ -22,8 +22,6 @@ If R is installed, you can launch the application directly via a command termina
 
 ## Installation 
 
-### YOU HAVE AN INTERNET ACCES : 
-
 1 - Install all the tools of SCONE, run this command in a R terminal :
 ```R
     install.packages(c("shiny", "shinydashboard", "shinycssloaders", "plotly", "DT", "shinyBS", "devtools", "Seurat"))
