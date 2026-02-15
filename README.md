@@ -3,7 +3,7 @@
 
 **Date:** Decembre 2025  
 **SCONE Authors :** [Camille PIGNOLET](https://github.com/CamillePignolet) [(camille.pignolet@inserm.fr)](mailto:camille.pignolet@inserm.fr) 
-<br> From GeNeHetX Team [website](https://www.genehetx.fr/)
+<br> From GeNeHetX Team [website](https://www.genehetx.fr/)<br>
 If you use it in your work, please cite it as: SCONE © 2026 by Camille Pignolet.
 <br>
 
@@ -13,6 +13,7 @@ SCONE is a tool for analyzing Single Cell RNA-Seq data. It guides the user throu
 
 ## Prerequisites : 
 SCONE requires the R language (at least version 4.0).<br>
+
 If R is installed, you can launch the application directly via a command terminal or work on Rstudio.
 
 - **REQUIRED** install R: [download](https://cran.r-project.org/)
