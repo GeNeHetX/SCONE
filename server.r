@@ -7,45 +7,21 @@ library(ggplot2)
 library(shinycssloaders)
 library(magrittr)
 library(shinyjs)
+library(gridExtra)
+library(jsonlite)
+library(DT)
+
 
 options(shiny.maxRequestSize = 500*1024^2)
 
 server <- function(input, output, session) {
-  rv <- reactiveValues(seu = NULL, meta_choices = NULL, log = character(), files = NULL)
+  
+  rv <- reactiveValues(seu = NULL, subset_cells = NULL, meta_choices = NULL, log = character(), files = NULL)
   
   append_log <- function(txt) {
     rv$log <- c(rv$log, txt)
   }
-  
-  # Show uploaded file list
-  output$file_list <- renderText({
-    if (is.null(input$input_zip)) return("No file uploaded")
-    paste("Uploaded:", input$input_zip$name)
-  })
-  
-  output$loaded_info <- renderUI({
-    if (is.null(rv$seu)) {
-      tagList(tags$b("No Seurat object loaded"))
-    } else {
-      ncell <- ncol(rv$seu)
-      ngene <- nrow(rv$seu)
-      tagList(
-        tags$b("Seurat object ready:"),
-        tags$ul(
-          tags$li(paste("Cells:", ncell)),
-          tags$li(paste("Genes:", ngene)),
-          tags$li(paste("Assay:", DefaultAssay(rv$seu)))
-        )
-      )
-    }
-  })
-  
-  output$status <- renderText({
-    if (length(rv$log) == 0) return("Idle")
-    paste(rev(rv$log), collapse = "\n")
-  })
-  
-output$tutorial_content <- renderUI({
+  output$tutorial_content <- renderUI({
   HTML("
         <h2>Single-Cell RNA-Seq Analysis with Seurat</h2>
 
@@ -150,39 +126,22 @@ output$tutorial_content <- renderUI({
   })
 
   # -------------------------
-  # Main Seurat pipeline
+  # LOAD FILES AND CREATE SEURAT OBJECT AUTOMATICALLY
   # -------------------------
-  observeEvent(input$run, {
+  observeEvent(input$input_zip, {
     req(input$input_zip)
-    append_log("Starting analysis...")
-    shinyjs::disable("run")
-    on.exit({ shinyjs::enable("run") })
-    
+    append_log("Starting Seurat object creation...")
+
     tmpdir <- tempdir()
     tryCatch({
       append_log("Unzipping input...")
       unzip(input$input_zip$datapath, exdir = tmpdir)
-      
+
       # Find matrix / features / barcodes
-      mtx_file <- list.files(tmpdir, pattern = "matrix.*\\.mtx$", full.names = TRUE, ignore.case = TRUE)
-      genes_file <- list.files(tmpdir, pattern = "(^genes|features).*\\.tsv$", full.names = TRUE, ignore.case = TRUE)
-      barcodes_file <- list.files(tmpdir, pattern = "barcodes.*\\.tsv$", full.names = TRUE, ignore.case = TRUE)
-      
-      if (length(mtx_file) == 0 || length(genes_file) == 0 || length(barcodes_file) == 0) {
-        all_files <- list.files(tmpdir, recursive = TRUE, full.names = TRUE)
-        if (length(mtx_file) == 0) mtx_file <- all_files[grepl("matrix.*\\.mtx$", all_files, ignore.case = TRUE)]
-        if (length(genes_file) == 0) genes_file <- all_files[grepl("(^|/)features.*\\.tsv$|(^|/)genes.*\\.tsv$", all_files, ignore.case = TRUE)]
-        if (length(barcodes_file) == 0) barcodes_file <- all_files[grepl("(^|/)barcodes.*\\.tsv$", all_files, ignore.case = TRUE)]
-      }
-      
-      if (length(mtx_file) < 1) stop("matrix.mtx not found inside the zip.")
-      if (length(genes_file) < 1) stop("genes.tsv / features.tsv not found inside the zip.")
-      if (length(barcodes_file) < 1) stop("barcodes.tsv not found inside the zip.")
-      
-      mtx_file <- mtx_file[1]
-      genes_file <- genes_file[1]
-      barcodes_file <- barcodes_file[1]
-      
+      mtx_file <- list.files(tmpdir, pattern = "matrix.*\\.mtx$", full.names = TRUE, ignore.case = TRUE)[1]
+      genes_file <- list.files(tmpdir, pattern = "(^genes|features).*\\.tsv$", full.names = TRUE, ignore.case = TRUE)[1]
+      barcodes_file <- list.files(tmpdir, pattern = "barcodes.*\\.tsv$", full.names = TRUE, ignore.case = TRUE)[1]
+
       append_log("Reading 10X matrix...")
       expressionMatrix <- ReadMtx(
         mtx = mtx_file,
@@ -192,99 +151,165 @@ output$tutorial_content <- renderUI({
         skip.cell = 1,
         cell.sep = "\t"
       )
-      
+
       append_log("Creating Seurat object...")
       seu <- CreateSeuratObject(counts = expressionMatrix)
 
-        # -------------------------
-        # QC METRICS OUTPUT
-        # -------------------------
-        observe({
+      # QC mitochondrial
+      mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
+      seu[["percent.mt"]] <- PercentageFeatureSet(seu, features = mito_genes)
+
+      # Store Seurat object
+      rv$seu <- seu
+      rv$files <- list(mtx = mtx_file, genes = genes_file, barcodes = barcodes_file)
+      append_log("Seurat object created.")
+
+      # -------------------------
+      # QC PLOTS
+      # -------------------------
+      output$qc_violin <- renderPlot({
         req(rv$seu)
-        seu <- rv$seu
+        df <- rv$seu@meta.data
+        p1 <- ggplot(df, aes(x = "", y = nFeature_RNA)) + geom_violin(fill = "lightblue") + geom_jitter(width = 0.2, size = 0.5) + theme_classic()
+        p2 <- ggplot(df, aes(x = "", y = nCount_RNA)) + geom_violin(fill = "lightgreen") + geom_jitter(width = 0.2, size = 0.5) + theme_classic()
+        p3 <- ggplot(df, aes(x = "", y = percent.mt)) + geom_violin(fill = "salmon") + geom_jitter(width = 0.2, size = 0.5) + theme_classic()
+        grid.arrange(p1, p2, p3, ncol = 3)
+      })
 
-        # Calculate percent mitochondrial if missing
-        if (!"percent.mt" %in% colnames(seu@meta.data)) {
-            mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
-            seu[["percent.mt"]] <- PercentageFeatureSet(seu, features = mito_genes)
-        }
+      output$qc_scatter1 <- renderPlot({ FeatureScatter(rv$seu, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") })
+      output$qc_scatter2 <- renderPlot({ FeatureScatter(rv$seu, feature1 = "nCount_RNA", feature2 = "percent.mt") })
 
-        output$qc_violin <- renderPlot({
-            p <- VlnPlot(seu, features = "nFeature_RNA",  pt.size = 0.1 )
-            print(p)
+      # -------------------------
+      # SHOW SUMMARY / OVERVIEW
+      # -------------------------
+      output$seu_summary <- renderPrint({ req(rv$seu); rv$seu })
+
+      rv$meta_base <- colnames(rv$seu@meta.data)  # Stocke les colonnes existantes
+
+      output$meta_table <- DT::renderDataTable({
+        req(rv$seu)
+        dynamic_cols <- grep("^(louvain_|kmeans_)", colnames(rv$seu@meta.data), value = TRUE)
+        meta_to_show <- rv$seu@meta.data[, c(rv$meta_base, dynamic_cols), drop = FALSE]
+        
+        DT::datatable(meta_to_show, options = list(pageLength = 10, scrollX = TRUE))
+      })
+
+
+      # -------------------------
+      # SUBSET UI (threshold inputs)
+      # -------------------------
+      output$subset_ui <- renderUI({
+        req(rv$seu)
+        tagList(
+          numericInput("nFeature_min", "Min nFeature_RNA", value = 200),
+          numericInput("nFeature_max", "Max nFeature_RNA", value = 5000),
+          numericInput("percent_mt_max", "Max percent.mt", value = 10)
+        )
+      })
+
+      observeEvent(input$apply_subset, {
+          req(rv$seu)
+          
+          # Appliquer le subset
+          cells_keep <- WhichCells(rv$seu, expression = 
+                                    nFeature_RNA >= input$nFeature_min &
+                                    nFeature_RNA <= input$nFeature_max &
+                                    percent.mt <= input$percent_mt_max)
+          
+          rv$subset_cells <- subset(rv$seu, cells = cells_keep)
+          
+          # Log
+          append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
+          
+          # Rendu du Seurat object subset avec nb de cellules et features
+          output$subset_summary <- renderPrint({
+            req(rv$subset_cells)
+            cat("Subset Seurat object summary:\n")
+            cat("Number of cells:", ncol(rv$subset_cells), "\n")
+            cat("Number of features:", nrow(rv$subset_cells), "\n")
+          })
         })
 
-        output$qc_scatter1 <- renderPlot({
-            FeatureScatter(seu, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-        })
+    }, error = function(e){
+      append_log(paste("ERROR:", e$message))
+      showNotification(paste("Error:", e$message), type = "error", duration = 8)
+    })
+    
+  })
 
-        output$qc_scatter2 <- renderPlot({
-            FeatureScatter(seu, feature1 = "nCount_RNA", feature2 = "percent.mt")
-        })
-        })
+  
+  # -------------------------
+  # RUN ANALYSIS (subset + normalize + PCA + clustering + UMAP)
+  # -------------------------
+  observeEvent(input$run_analysis, {
+    req(rv$seu)
+    shinyjs::disable("run_analysis")
+    on.exit({ shinyjs::enable("run_analysis") })
 
+    tryCatch({
+      seu <- rv$seu
 
+      # Apply subset if thresholds defined
+      if (!is.null(input$nFeature_min) && !is.null(input$nFeature_max) && !is.null(input$percent_mt_max)) {
+        cells_keep <- WhichCells(seu, expression = 
+                                   nFeature_RNA >= input$nFeature_min &
+                                   nFeature_RNA <= input$nFeature_max &
+                                   percent.mt <= input$percent_mt_max)
+        seu <- subset(seu, cells = cells_keep)
+        append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
+      } else {
+        append_log("No subset thresholds applied; running on all cells")
+      }
+
+      # Normalize, HVG, Scale, PCA
       append_log("Normalizing data...")
       seu <- NormalizeData(seu, verbose = FALSE)
       append_log(paste("Finding variable features (n=", input$n_hvg, ")", sep=""))
-      seu <- FindVariableFeatures(seu, selection.method = "vst", nfeatures = input$n_hvg, verbose = FALSE)
+      seu <- FindVariableFeatures(seu, selection.method="vst", nfeatures=input$n_hvg, verbose=FALSE)
       append_log("Scaling data...")
       seu <- ScaleData(seu, verbose = FALSE)
       append_log(paste("Running PCA (npcs=", input$n_pcs, ")", sep=""))
       seu <- RunPCA(seu, npcs = input$n_pcs, verbose = FALSE)
-      
+
       # Clustering
       if (input$clust_method == "louvain") {
-        append_log("Finding neighbors...")
-        seu <- FindNeighbors(seu, dims = 1:input$n_pcs, k.param = input$knn, verbose = FALSE)
-        append_log(paste("Finding clusters (resolution=", input$resolution, ")", sep=""))
-        seu <- FindClusters(seu, resolution = input$resolution, verbose = FALSE)
+        cluster_name <- paste0("louvain_n", input$knn, "_res", input$resolution)
+        append_log(paste("Running Louvain clustering:", cluster_name))
+        seu <- FindNeighbors(seu, dims = 1:input$n_pcs, k.param = input$knn)
+        seu <- FindClusters(seu, resolution = input$resolution)
+        seu@meta.data[[cluster_name]] <- Idents(seu)
+        Idents(seu) <- seu@meta.data[[cluster_name]]
       } else {
-        append_log("Running Kmeans on PCA embeddings...")
+        cluster_name <- paste0("kmeans_n", input$kmeans_centers, "_res", input$resolution)
+        append_log(paste("Running K-means clustering:", cluster_name))
         pca_emb <- Embeddings(seu, "pca")[, 1:input$n_pcs, drop = FALSE]
         km <- kmeans(pca_emb, centers = input$kmeans_centers)
-        seu$kmeans_clusters <- as.factor(km$cluster)
-        Idents(seu) <- seu$kmeans_clusters
+        seu@meta.data[[cluster_name]] <- as.factor(km$cluster)
+        Idents(seu) <- seu@meta.data[[cluster_name]]
       }
-      
-      append_log("Running UMAP...")
-      seu <- RunUMAP(seu, dims = 1:input$n_pcs, verbose = FALSE)
-      
-      # -------------------------
-      # Incorporate external metadata
-      # -------------------------
-      if (!is.null(input$meta_file)) {
-        append_log("Loading external metadata...")
-        meta_ext <- read.table(input$meta_file$datapath, sep="\t", header=TRUE, row.names=1, stringsAsFactors = FALSE)
-        # Ensure barcodes match
-        common_cells <- intersect(colnames(seu), rownames(meta_ext))
-        if (length(common_cells) == 0) {
-          append_log("WARNING: no matching barcodes in external metadata.")
-        } else {
-          seu <- AddMetaData(seu, metadata = meta_ext[common_cells, , drop=FALSE])
-          append_log(paste("External metadata merged:", ncol(meta_ext), "columns"))
-        }
+
+      # UMAP
+      if (!"umap" %in% names(seu@reductions)) {
+        append_log("Running UMAP...")
+        seu <- RunUMAP(seu, dims = 1:input$n_pcs, verbose = FALSE)
       }
-      
+
       rv$seu <- seu
-      rv$files <- list(mtx = mtx_file, genes = genes_file, barcodes = barcodes_file)
-      append_log("Seurat pipeline completed.")
-      
-      # Update metadata choices
-      meta_df <- seu@meta.data
-      meta_choices <- names(meta_df)
-      rv$meta_choices <- meta_choices
-      updateSelectInput(session, "meta_color_by", choices = meta_choices, selected = "seurat_clusters")
+      rv$meta_choices <- grep("^(louvain_|kmeans_)", names(seu@meta.data), value = TRUE)
+      append_log(paste("Clustering done:", cluster_name))
+      append_log("Analysis completed.")
+
+      updateSelectInput(session, "meta_color_by", choices = rv$meta_choices, selected = cluster_name)
       output$metadata_selector <- renderUI({
-        selectInput("meta_choice", "Select metadata for splitting / viewing", choices = meta_choices)
+        selectInput("meta_choice", "Select metadata for plotting", choices = rv$meta_choices)
       })
-      
-    }, error = function(e) {
+
+    }, error = function(e){
       append_log(paste("ERROR:", e$message))
-      showNotification(paste("Error:", e$message), type = "error", duration = 8)
+      showNotification(paste("Error:", e$message), type="error", duration = 8)
     })
   })
-  
+
   # -------------------------
   # UMAP plots
   # -------------------------
@@ -294,7 +319,7 @@ output$tutorial_content <- renderUI({
       DimPlot(rv$seu, reduction = "umap", label = TRUE, repel = TRUE) + ggtitle("UMAP - clusters")
     }, error = function(e) ggplot() + ggtitle("Unable to plot UMAP"))
   })
-  
+
   output$umapMetaPlot <- renderPlot({
     req(rv$seu)
     req(input$meta_color_by)
@@ -305,90 +330,548 @@ output$tutorial_content <- renderUI({
         ggtitle(paste("UMAP colored by", input$meta_color_by))
     }
   })
+
+  # -------------------------
+  # Log output
+  # -------------------------
+  output$status <- renderText({
+    if (length(rv$log) == 0) return("Idle")
+    paste(rev(rv$log), collapse = "\n")
+  })
+ 
+  # -------------------------
+  # UMAP plots
+  # -------------------------
+  # output$umapPlot <- renderPlot({
+  #   req(rv$seu)
+  #   tryCatch({
+  #     DimPlot(rv$seu, reduction = "umap", label = TRUE, repel = TRUE) + ggtitle("UMAP - clusters")
+  #   }, error = function(e) ggplot() + ggtitle("Unable to plot UMAP"))
+  # })
+    # UMAP pour Violin
+  output$umapViolinPlot <- renderPlot({
+    req(rv$seu)
+    req(input$split_meta)
+    DimPlot(rv$seu, reduction = "umap", group.by = input$split_meta)
+  })
+
+  # UMAP pour DotPlot
+  output$umapDotPlot <- renderPlot({
+    req(rv$seu)
+    req(input$dot_split_meta)
+    DimPlot(rv$seu, reduction = "umap", group.by = input$dot_split_meta)
+  })
+
+  
+  output$umapMetaPlot <- renderPlot({
+    req(rv$seu)
+    req(input$meta_color_by)
+    if (!(input$meta_color_by %in% colnames(rv$seu@meta.data))) {
+      ggplot() + ggtitle("Selected metadata not found")
+    } else {
+      DimPlot(rv$seu, reduction = "umap", group.by = input$meta_color_by, label = FALSE) 
+        # +ggtitle(paste("UMAP colored by", input$meta_color_by))
+    }
+  })
   
   # -------------------------
   # Violin
   # -------------------------
-  output$split_meta_ui <- renderUI({
-    req(rv$meta_choices)
-    selectInput("split_meta", "Split by (metadata)", choices = rv$meta_choices, selected = rv$meta_choices[1])
-  })
-  
-  observeEvent(input$plot_violin, {
-    req(rv$seu)
-    gene <- input$violin_gene
-    if (gene == "") {
-      showNotification("Please provide a gene symbol", type="warning")
-      return()
-    }
-    output$violinPlot <- renderPlot({
-      seu <- rv$seu
-      if (!(gene %in% rownames(seu))) {
-        gene2 <- toupper(gene)
-        if (gene2 %in% rownames(seu)) gene <- gene2
-      }
-      if (!(gene %in% rownames(seu))) {
-        plot.new(); title(paste("Gene", gene, "not found"))
-      } else {
-        if (input$split_by && !is.null(input$split_meta) && input$split_meta %in% colnames(seu@meta.data)) {
-          VlnPlot(seu, features = gene, group.by = "seurat_clusters", split.by = input$split_meta, pt.size = 0.1) +
-            ggtitle(paste("Violin:", gene))
-        } else {
-          VlnPlot(seu, features = gene, group.by = "seurat_clusters", pt.size = 0.1) + ggtitle(paste("Violin:", gene))
-        }
-      }
+  gene_families <- reactive({
+      path <- "markers_celltypes.json"
+      req(file.exists(path))
+      jsonlite::fromJSON(path)
     })
-  })
-  
+
+  output$violin_gene_ui <- renderUI({
+      req(rv$seu)
+      genes <- rownames(rv$seu)
+      selectizeInput(
+        inputId = "violin_gene",
+        label = "Gene(s)",
+        choices = genes,
+        selected = NULL,
+        multiple = TRUE,
+        options = list(
+          placeholder = 'Start typing gene...',
+          maxOptions = 1000,
+          create = FALSE
+        )
+      )
+    })
+
+    output$violin_gene_family_ui <- renderUI({
+      req(gene_families())   # s’assure que le JSON est chargé
+      selectInput(
+        "violin_gene_family", 
+        "Gene family (optional)", 
+        choices = c("None" = "", names(gene_families())),
+        selected = ""
+      )
+    })
+
+    observe({
+      req(rv$seu)
+      updateSelectizeInput(session, "violin_gene", choices = rownames(rv$seu), server = TRUE)
+    })
+
+    # Split meta UI
+    output$split_meta_ui <- renderUI({
+      req(rv$meta_choices)
+      selectInput("split_meta", "Split by (metadata)", choices = rv$meta_choices, selected = rv$meta_choices[1])
+    })
+
+    observeEvent(input$plot_violin, {
+      req(rv$seu)
+
+      genes_manual <- input$violin_gene
+      genes_family <- if(input$violin_gene_family != "") gene_families()[[input$violin_gene_family]] else character(0)
+      genes_to_plot <- unique(c(genes_manual, genes_family))
+      genes_exist <- genes_to_plot[genes_to_plot %in% rownames(rv$seu)]
+      
+      if (length(genes_exist) == 0) {
+        showNotification("None of the selected genes are found in the Seurat object", type="error")
+        return()
+      }
+
+      output$violinPlot <- renderPlot({
+        df <- rv$seu@meta.data
+        expr_data <- GetAssayData(rv$seu, layer="data")  # Seurat v5
+
+        plots <- lapply(genes_exist, function(gene) {
+          df[[gene]] <- expr_data[gene, ]
+          if (input$split_by && !is.null(input$split_meta) && input$split_meta %in% colnames(df)) {
+            ggplot(df, aes_string(x=input$split_meta, y=gene)) +
+              geom_violin(fill="lightblue") +
+              geom_jitter(width=0.2, size=0.5) +
+              theme_classic() +
+              ggtitle(gene)
+          } else {
+            ggplot(df, aes_string(x="1", y=gene)) +
+              geom_violin(fill="lightblue") +
+              geom_jitter(width=0.2, size=0.5) +
+              theme_classic() +
+              ggtitle(gene)
+          }
+        })
+        gridExtra::grid.arrange(grobs=plots, ncol=3)
+      })
+    })
+
   # -------------------------
   # DotPlot
   # -------------------------
-  observeEvent(input$plot_dot, {
+  observe({
     req(rv$seu)
-    genes <- unlist(strsplit(input$dot_genes, ","))
-    genes <- trimws(genes[genes != ""])
-    if (length(genes) == 0) {
-      showNotification("Provide at least one gene", type="warning")
-      return()
-    }
-    output$dotPlot <- renderPlot({
-      genes_in <- genes[genes %in% rownames(rv$seu)]
-      if (length(genes_in) == 0) {
-        plot.new(); title("No provided genes found in data")
-      } else {
-        DotPlot(rv$seu, features = genes_in, group.by = "seurat_clusters") + RotatedAxis() +
-          ggtitle("DotPlot by cluster")
-      }
-    })
+    updateSelectizeInput(session, "dot_genes", choices = rownames(rv$seu), server = TRUE )
   })
+
+  output$dot_gene_family_ui <- renderUI({
+      req(gene_families())  # JSON déjà chargé
+      selectInput(
+        "dot_gene_family", 
+        "Gene family (optional)", 
+        choices = c("None" = "", names(gene_families())),
+        selected = ""
+      )
+    })
+    
+    output$dot_split_meta_ui <- renderUI({
+        req(rv$meta_choices)
+
+        selectInput(
+          "dot_split_meta",
+          "Group DotPlot by:",
+          choices = rv$meta_choices,
+          selected = "seurat_clusters"  # valeur par défaut
+        )
+      })
+
+
+    observeEvent(input$plot_dot, {
+        req(rv$seu)
+
+        genes_manual <- input$dot_genes
+        genes_family <- if(input$dot_gene_family != "")
+          gene_families()[[input$dot_gene_family]]
+        else character(0)
+
+        genes_to_plot <- unique(c(genes_manual, genes_family))
+        genes_exist <- genes_to_plot[genes_to_plot %in% rownames(rv$seu)]
+
+        if (length(genes_exist) == 0) {
+          showNotification(
+            "None of the selected genes are found in the Seurat object",
+            type="error"
+          )
+          return()
+        }
+
+        output$dotPlot <- renderPlot({
+          group_var <- if (
+            !is.null(input$dot_split_meta) &&
+            input$dot_split_meta %in% colnames(rv$seu@meta.data)
+          ) {
+            input$dot_split_meta
+          } else {
+            "seurat_clusters"
+          }
+
+          DotPlot(rv$seu,
+            features = genes_exist, 
+            group.by = group_var,
+            cols = c("blue", "red")
+          ) + coord_flip()
+
+        })
+
+      })
+
+
 
     # -------------------------
     # FIND MARKERS
     # -------------------------
+
+    # UI dynamique pour choisir metadata
+    output$marker_split_meta_ui <- renderUI({
+      req(rv$meta_choices)
+
+      selectInput(
+        "marker_split_meta",
+        "Group cells by:",
+        choices = rv$meta_choices,
+        selected = "seurat_clusters"
+      )
+    })
+
+    # UI dynamique pour choisir clusters selon le mode
+    output$cluster_select_ui <- renderUI({
+      req(rv$seu)
+      req(input$marker_split_meta)
+      clusters <- sort(unique(rv$seu@meta.data[[input$marker_split_meta]]))
+
+      if (input$marker_mode == "vsrest") {
+
+        selectInput(
+          "cluster_a",
+          "Cluster of interest:",
+          choices = clusters,
+          selected = clusters[1]
+        )
+
+      } else { # vscluster
+
+        tagList(
+          selectInput(
+            "cluster_a",
+            "Cluster A:",
+            choices = clusters,
+            selected = clusters[1]
+          ),
+          selectInput(
+            "cluster_b",
+            "Cluster B:",
+            choices = clusters,
+            selected = if (length(clusters) > 1) clusters[2] else clusters[1]
+          )
+        )
+      }
+    })
+
+    output$umapMarkerPlot <- renderPlot({
+      req(rv$seu)
+      req(input$marker_split_meta)
+
+      DimPlot(rv$seu, reduction = "umap", group.by = input$marker_split_meta) +
+        theme_minimal()
+    })
+
+    # calcul des markers
     observeEvent(input$run_markers, {
+
+      req(rv$seu)
+      req(input$marker_split_meta)
+      seu <- rv$seu
+
+      # mettre la metadata choisie comme ident
+      Idents(seu) <- seu[[input$marker_split_meta]][,1]
+
+      mode <- input$marker_mode
+
+      # Progress bar
+      withProgress(message = "Finding markers...", {
+
+        # 1 vs 1 : vérif clusters différents
+        if (mode == "vscluster" && input$cluster_a == input$cluster_b) {
+          showNotification("Please select two different clusters", type = "error")
+          return()
+        }
+
+        # 1 vs 1
+        if (mode == "vscluster") {
+
+          req(input$cluster_a, input$cluster_b)
+
+          res <- FindMarkers(
+            seu,
+            ident.1 = input$cluster_a,
+            ident.2 = input$cluster_b,
+            logfc.threshold = 0.25
+          )
+
+          if (nrow(res) > 0) {
+            res$cluster <- paste(input$cluster_a, "vs", input$cluster_b)
+          }
+
+        } else { # vs rest
+
+          req(input$cluster_a)
+
+          res <- FindMarkers(
+            seu,
+            ident.1 = input$cluster_a,
+            logfc.threshold = 0.25
+          )
+
+          if (nrow(res) > 0) {
+            res$cluster <- input$cluster_a
+          }
+
+        } # fin mode
+
+      }) # fin withProgress
+
+      # ajouter colonne gene
+      res$gene <- rownames(res)
+
+      # protection si aucun marker
+      if (nrow(res) == 0) {
+
+        showNotification("No markers found with current thresholds", type = "warning")
+
+        output$marker_table <- DT::renderDataTable({
+          DT::datatable(data.frame())
+        })
+
+        output$top_marker_table <- DT::renderDataTable({
+          DT::datatable(data.frame())
+        })
+
+        return()
+      }
+
+      # -------------------------
+      # Full table
+      # -------------------------
+      output$marker_table <- DT::renderDataTable({
+        DT::datatable(
+          res,
+          options = list(pageLength = 25, scrollX = TRUE)
+        )
+      })
+
+      # -------------------------
+      # Top markers : juste la liste des gènes par cluster
+      # -------------------------
+      # -------------------------
+      # Top markers : liste des gènes par cluster
+      # -------------------------
+      if (input$marker_mode == "vscluster") {
+        
+        # Cluster A : logFC positif → enrichi dans cluster A
+        top_cluster_a <- res |>
+          dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 0) |>
+          dplyr::slice_max(avg_log2FC, n = input$top_n) |>
+          dplyr::mutate(top_for = input$cluster_a) |>
+          dplyr::select(top_for, gene, avg_log2FC)
+        
+        # Cluster B : logFC négatif → enrichi dans cluster B
+        top_cluster_b <- res |>
+          dplyr::filter(p_val_adj < 0.05 & avg_log2FC < 0) |>
+          dplyr::slice_min(avg_log2FC, n = input$top_n) |>
+          dplyr::mutate(top_for = input$cluster_b, avg_log2FC = abs(avg_log2FC)) |>
+          dplyr::select(top_for, gene, avg_log2FC)
+        
+        top_markers <- dplyr::bind_rows(top_cluster_a, top_cluster_b)
+        
+      } else {
+        
+        # vs rest ou FindAllMarkers
+        top_markers <- res |>
+          dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 0) |>
+          dplyr::group_by(cluster) |>
+          dplyr::slice_max(avg_log2FC, n = input$top_n) |>
+          dplyr::ungroup() |>
+          dplyr::select(cluster, gene, avg_log2FC)
+      }
+
+      output$top_marker_table <- DT::renderDataTable({
+        DT::datatable(
+          top_markers,
+          options = list(pageLength = 10, scrollX = TRUE)
+        )
+      })
+
+
+
+    }) 
+
+    output$marker_table_title <- renderUI({
+    HTML("
+    <b>Columns explanation:</b><br>
+    <ul>
+      <li><b>avg_log2FC</b>: average log2 fold change of expression between the two groups</li>
+      <li><b>pct.1</b>: fraction of cells expressing the gene in the cluster of interest (ident.1)</li>
+      <li><b>pct.2</b>: fraction of cells expressing the gene in the other cluster (ident.2 or rest)</li>
+      <li><b>p_val_adj</b>: adjusted p-value for differential expression</li>
+      <li><b>cluster</b>: the cluster in which the gene is differential (cluster of interest)</li>
+    </ul>
+    ")
+  })
+
+
+    # -----------------------
+    # Annotate manual clusters
+    # -----------------------
+
+    output$annot_split_meta_ui <- renderUI({
+  req(rv$meta_choices)
+  selectInput(
+    "annot_split_meta",
+    "Group cells by:",
+    choices = rv$meta_choices,
+    selected = rv$meta_choices[1]
+  )
+})
+
+output$cluster_labels_ui <- renderUI({
+  req(rv$seu)
+  req(input$annot_split_meta)
+  clusters <- sort(unique(rv$seu@meta.data[[input$annot_split_meta]]))
+  tagList(
+    lapply(clusters, function(cl){
+      fluidRow(
+        column(5, textInput(paste0("label_", cl), 
+                            label = paste("Cluster", cl, "label"), 
+                            value = cl)),
+        column(5, textInput(paste0("color_", cl), 
+                            label = "Color (hex)", 
+                            value = rainbow(length(clusters))[which(clusters==cl)]))
+      )
+    })
+  )
+})
+
+annot_colors <- reactiveVal(NULL)
+
+observeEvent(input$apply_labels, {
+  req(rv$seu)
+  req(input$annot_split_meta)
+  clusters <- sort(unique(rv$seu@meta.data[[input$annot_split_meta]]))
+  labels <- sapply(clusters, function(cl) input[[paste0("label_", cl)]])
+  colors <- sapply(clusters, function(cl) input[[paste0("color_", cl)]])
+  unique_labels <- unique(labels)
+  final_colors <- setNames(colors[match(unique_labels, labels)], unique_labels)
+  annot_colors(list(clusters = clusters, labels = labels, colors = final_colors))
+})
+
+output$annot_umap <- renderPlot({
+  req(rv$seu)
+  req(input$annot_split_meta)
+  seu <- rv$seu
+  umap_df <- as.data.frame(Embeddings(seu, "umap"))
+  colnames(umap_df) <- c("UMAP1","UMAP2")
+  cluster_vec <- as.character(seu@meta.data[[input$annot_split_meta]])
+
+  if (!is.null(annot_colors())) {
+    clusters <- annot_colors()$clusters
+    labels <- annot_colors()$labels
+    colors_input <- annot_colors()$colors
+    cluster_to_label <- setNames(labels, clusters)
+    cell_labels <- cluster_to_label[cluster_vec]
+    umap_df$label <- cell_labels
+    label_colors <- colors_input
+
+    ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = label)) +
+    geom_point(size = 1) +
+    scale_color_manual(values = label_colors) +
+    theme_minimal() +
+    theme(
+      legend.title = element_text(size = 16),
+      legend.text = element_text(size = 14)
+    ) +
+    ggtitle("UMAP annotated by user labels")
+
+  } else {
+    DimPlot(seu, reduction = "umap", group.by = input$annot_split_meta) +
+      theme_minimal()
+  }
+})
+
+output$download_umap_pdf <- downloadHandler(
+  filename = function() {
+    paste0("UMAP_annotated_", Sys.Date(), ".pdf")
+  },
+  content = function(file) {
     req(rv$seu)
+    req(input$annot_split_meta)
     seu <- rv$seu
+    umap_df <- as.data.frame(Embeddings(seu, "umap"))
+    colnames(umap_df) <- c("UMAP1","UMAP2")
+    cluster_vec <- as.character(seu@meta.data[[input$annot_split_meta]])
 
-    cluster1 <- input$cluster_a
-    cluster2 <- input$cluster_b
-    mode <- input$marker_mode
-
-    # Identify identities
-    Idents(seu) <- seu$seurat_clusters
-
-    if (mode == "all") {
-        res <- FindAllMarkers(seu, only.pos = TRUE)
-    } else if (mode == "vscluster") {
-        res <- FindMarkers(seu, ident.1 = cluster1, ident.2 = cluster2)
+    if (!is.null(annot_colors())) {
+      clusters <- annot_colors()$clusters
+      labels <- annot_colors()$labels
+      colors_input <- annot_colors()$colors
+      cluster_to_label <- setNames(labels, clusters)
+      cell_labels <- cluster_to_label[cluster_vec]
+      umap_df$label <- cell_labels
+      label_colors <- colors_input
     } else {
-        # vs rest
-        res <- FindMarkers(seu, ident.1 = cluster1)
+      umap_df$label <- cluster_vec
+      label_colors <- rainbow(length(unique(cluster_vec)))
     }
 
-    output$marker_table <- renderDataTable({
-        res
-    })
-    })
-    
+    pdf(file, width = 10, height = 8)
+    print(
+      ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = label)) +
+        geom_point(size = 1) +
+        scale_color_manual(values = label_colors) +
+        theme_minimal() +
+        theme(
+          legend.title = element_text(size = 16),
+          legend.text = element_text(size = 14)
+        ) +
+        ggtitle("UMAP annotated by user labels")
+    )
+    dev.off()
+  }
+)
+output$download_metadata_csv <- downloadHandler(
+  filename = function() { paste0("metadata_with_labels_", Sys.Date(), ".csv") },
+  content = function(file) {
+    req(rv$seu)
+    req(input$annot_split_meta)
+    seu <- rv$seu
 
+    meta_df <- seu@meta.data
+    cluster_vec <- as.character(meta_df[[input$annot_split_meta]])
+
+    if (!is.null(annot_colors())) {
+      clusters <- annot_colors()$clusters
+      labels <- annot_colors()$labels
+      cluster_to_label <- setNames(labels, clusters)
+      meta_df$custom_label <- cluster_to_label[cluster_vec]
+    } else {
+      meta_df$custom_label <- cluster_vec
+    }
+
+    write.csv(meta_df, file, row.names = TRUE)
+  }
+)
+
+
+  
 }
