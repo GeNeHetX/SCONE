@@ -380,7 +380,7 @@ server <- function(input, output, session) {
     if (!(input$meta_color_by %in% colnames(rv$seu@meta.data))) {
       ggplot() + ggtitle("Selected metadata not found")
     } else {
-      DimPlot(rv$seu, reduction = "umap", group.by = input$meta_color_by, label = FALSE) +
+      DimPlot(rv$seu, reduction = "umap", label = TRUE, group.by = input$meta_color_by) +
         ggtitle(paste("UMAP colored by", input$meta_color_by))
     }
   })
@@ -406,14 +406,14 @@ server <- function(input, output, session) {
   output$umapViolinPlot <- renderPlot({
     req(rv$seu)
     req(input$split_meta)
-    DimPlot(rv$seu, reduction = "umap", group.by = input$split_meta)
+    DimPlot(rv$seu, reduction = "umap", group.by = input$split_meta, label = TRUE)
   })
 
   # UMAP pour DotPlot
   output$umapDotPlot <- renderPlot({
     req(rv$seu)
     req(input$dot_split_meta)
-    DimPlot(rv$seu, reduction = "umap", group.by = input$dot_split_meta)
+    DimPlot(rv$seu, reduction = "umap", group.by = input$dot_split_meta, label = TRUE)
   })
 
   
@@ -423,7 +423,7 @@ server <- function(input, output, session) {
     if (!(input$meta_color_by %in% colnames(rv$seu@meta.data))) {
       ggplot() + ggtitle("Selected metadata not found")
     } else {
-      DimPlot(rv$seu, reduction = "umap", group.by = input$meta_color_by, label = FALSE) 
+      DimPlot(rv$seu, reduction = "umap", group.by = input$meta_color_by, label = TRUE) 
         # +ggtitle(paste("UMAP colored by", input$meta_color_by))
     }
   })
@@ -637,7 +637,7 @@ server <- function(input, output, session) {
       req(rv$seu)
       req(input$marker_split_meta)
 
-      DimPlot(rv$seu, reduction = "umap", group.by = input$marker_split_meta) +
+      DimPlot(rv$seu, reduction = "umap", group.by = input$marker_split_meta, label = TRUE) +
         theme_minimal()
     })
 
@@ -880,7 +880,7 @@ output$annot_umap <- renderPlot({
     ggtitle("UMAP annotated by user labels")
 
   } else {
-    DimPlot(seu, reduction = "umap", group.by = input$annot_split_meta) +
+    DimPlot(seu, reduction = "umap", group.by = input$annot_split_meta, label = TRUE) +
       theme_minimal()
   }
 })
