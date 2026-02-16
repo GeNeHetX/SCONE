@@ -3,6 +3,7 @@ library(shinydashboard)
 library(shinycssloaders)
 library(magrittr)
 library(shinyjs)
+library(shinyBS)
 
 # Palette Sakura
 header_bg <- "#FCE4EC"
@@ -43,16 +44,18 @@ ui <- dashboardPage(
     numericInput("n_hvg", "High Variable Genes (HVG)", value = 1000),
     numericInput("n_pcs", "PCA components", value = 20),
 
-    radioButtons("clust_method", "Clustering method",
-                 choices = list("Louvain" = "louvain", "Kmeans" = "kmeans")),
-
+    radioButtons("clust_method",label = div("Clustering method",span(icon("circle-info"), id="clust_info")), choices = list("Louvain" = "louvain", "Leiden"  = "leiden", "Kmeans"  = "kmeans"),inline=TRUE, selected = "leiden"),
+    bsTooltip( "clust_info", title = HTML(
+        "Louvain: community detection based on modularity<br/>
+        Leiden: improved Louvain, better partitions<br/>
+        K-means: partition cells in k clusters based on PCA")),
+        
+    # Paramètres conditionnels
     conditionalPanel("input.clust_method == 'louvain'", numericInput("knn", "Neighbors (k)", value = 20)),
+    conditionalPanel("input.clust_method == 'leiden'", numericInput("leiden_k", "Neighbors (k)", value = 20)),
     conditionalPanel("input.clust_method == 'kmeans'", numericInput("kmeans_centers", "Centers (k)", value = 10)),
-
-    sliderInput("resolution", "Resolution of clustering", 0.1, 2, 0.5, step = 0.1),
-
-    actionButton("run_analysis", "RUN Seurat Analysis", icon = icon("play"),
-                 style = paste0("background:", btn_bg, "; color:", btn_text, ";")),
+    sliderInput( "resolution", "Resolution of clustering", min = 0.1, max = 2, value = 0.5, step = 0.1),
+    actionButton("run_analysis", "RUN Seurat Analysis", icon = icon("play"), style = paste0("background:", btn_bg, "; color:", btn_text, ";")),
 
     # tags$hr(),
     # uiOutput("loaded_info"),
@@ -276,6 +279,7 @@ fluidRow(
                 column(12,
                        actionButton("apply_subset", "Apply Subset", icon = icon("filter"),
                                     style = paste0("background:", btn_bg, "; color:", btn_text, ";")),
+                      uiOutput("subset_message"),
                       verbatimTextOutput("subset_summary") %>% withSpinner()
                 )
               )

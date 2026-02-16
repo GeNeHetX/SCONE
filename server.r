@@ -32,7 +32,9 @@ library(jsonlite)
 library(DT)
 
 
-options(shiny.maxRequestSize = 500*1024^2)
+# options(shiny.maxRequestSize = 500*1024^2)
+DT::datatable(data.frame(), extensions = "Buttons")
+
 
 server <- function(input, output, session) {
   
@@ -198,6 +200,7 @@ server <- function(input, output, session) {
 
       output$qc_scatter1 <- renderPlot({ FeatureScatter(rv$seu, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") })
       output$qc_scatter2 <- renderPlot({ FeatureScatter(rv$seu, feature1 = "nCount_RNA", feature2 = "percent.mt") })
+ 
 
       # -------------------------
       # SHOW SUMMARY / OVERVIEW
@@ -208,7 +211,7 @@ server <- function(input, output, session) {
 
       output$meta_table <- DT::renderDataTable({
         req(rv$seu)
-        dynamic_cols <- grep("^(louvain_|kmeans_)", colnames(rv$seu@meta.data), value = TRUE)
+        dynamic_cols <- grep("^(louvain_|kmeans_|leiden_)", colnames(rv$seu@meta.data), value = TRUE)
         meta_to_show <- rv$seu@meta.data[, c(rv$meta_base, dynamic_cols), drop = FALSE]
         
         DT::datatable(meta_to_show, options = list(pageLength = 10, scrollX = TRUE))
@@ -227,17 +230,25 @@ server <- function(input, output, session) {
         )
       })
 
+      subset_done <- reactiveVal(FALSE)
+      rv$seu_original <- seu   # copie intacte
+      rv$seu <- seu            # objet de travail
+      rv$subset_cells <- NULL
+
+
       observeEvent(input$apply_subset, {
-          req(rv$seu)
+          subset_done(TRUE)
+          req(rv$seu_original)
           
           # Appliquer le subset
-          cells_keep <- WhichCells(rv$seu, expression = 
+          cells_keep <- WhichCells(rv$seu_original, expression = 
                                     nFeature_RNA >= input$nFeature_min &
                                     nFeature_RNA <= input$nFeature_max &
                                     percent.mt <= input$percent_mt_max)
           
-          rv$subset_cells <- subset(rv$seu, cells = cells_keep)
-          
+          rv$subset_cells <- subset(rv$seu_original, cells = cells_keep)
+          rv$seu <- rv$subset_cells
+
           # Log
           append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
           
@@ -249,6 +260,18 @@ server <- function(input, output, session) {
             cat("Number of features:", nrow(rv$subset_cells), "\n")
           })
         })
+        
+        seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu_original
+            
+        output$subset_message <- renderUI({
+            req(subset_done())
+
+            tags$span(
+              "→ Run analysis again with you subsetted Seurat object",
+              style = "margin-left:10px; font-style:italic; color:#666;"
+            )
+          })
+
 
     }, error = function(e){
       append_log(paste("ERROR:", e$message))
@@ -299,7 +322,16 @@ server <- function(input, output, session) {
         seu <- FindClusters(seu, resolution = input$resolution)
         seu@meta.data[[cluster_name]] <- Idents(seu)
         Idents(seu) <- seu@meta.data[[cluster_name]]
-      } else {
+
+      } else if (input$clust_method == "leiden") {
+        cluster_name <- paste0("leiden_n", input$leiden_k, "_res", input$resolution)
+        append_log(paste("Running Leiden clustering:", cluster_name))
+        seu <- FindNeighbors(seu, dims = 1:input$n_pcs, k.param = input$leiden_k)
+        seu <- FindClusters(seu, resolution = input$resolution, algorithm = 4) # 4 = Leiden
+        seu@meta.data[[cluster_name]] <- Idents(seu)
+        Idents(seu) <- seu@meta.data[[cluster_name]]
+
+      } else { # kmeans
         cluster_name <- paste0("kmeans_n", input$kmeans_centers, "_res", input$resolution)
         append_log(paste("Running K-means clustering:", cluster_name))
         pca_emb <- Embeddings(seu, "pca")[, 1:input$n_pcs, drop = FALSE]
@@ -308,6 +340,8 @@ server <- function(input, output, session) {
         Idents(seu) <- seu@meta.data[[cluster_name]]
       }
 
+
+
       # UMAP
       if (!"umap" %in% names(seu@reductions)) {
         append_log("Running UMAP...")
@@ -315,7 +349,7 @@ server <- function(input, output, session) {
       }
 
       rv$seu <- seu
-      rv$meta_choices <- grep("^(louvain_|kmeans_)", names(seu@meta.data), value = TRUE)
+      rv$meta_choices <- grep("^(louvain_|kmeans_|leiden_)", names(seu@meta.data), value = TRUE)
       append_log(paste("Clustering done:", cluster_name))
       append_log("Analysis completed.")
 
@@ -687,9 +721,20 @@ server <- function(input, output, session) {
       output$marker_table <- DT::renderDataTable({
         DT::datatable(
           res,
-          options = list(pageLength = 25, scrollX = TRUE)
+          extensions = "Buttons",
+          options = list(
+            pageLength = 25,
+            scrollX = TRUE,
+            dom = "Bfrtip",
+            buttons = list(
+              list(extend = "copy",  text = "Copy"),
+              list(extend = "csv",   text = "CSV",   filename = "markers_table"),
+              list(extend = "excel", text = "Excel", filename = "markers_table")
+            )
+          )
         )
       })
+
 
       # -------------------------
       # Top markers : juste la liste des gènes par cluster
@@ -729,9 +774,20 @@ server <- function(input, output, session) {
       output$top_marker_table <- DT::renderDataTable({
         DT::datatable(
           top_markers,
-          options = list(pageLength = 10, scrollX = TRUE)
+          extensions = "Buttons",
+          options = list(
+            pageLength = 10,
+            scrollX = TRUE,
+            dom = "Bfrtip",
+            buttons = list(
+              list(extend = "copy",  text = "Copy"),
+              list(extend = "csv",   text = "CSV",   filename = "top_markers"),
+              list(extend = "excel", text = "Excel", filename = "top_markers")
+            )
+          )
         )
       })
+
 
 
 
