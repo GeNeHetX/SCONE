@@ -32,7 +32,7 @@ library(jsonlite)
 library(DT)
 
 
-# options(shiny.maxRequestSize = 500*1024^2)
+options(shiny.maxRequestSize = 100*1024^3)
 DT::datatable(data.frame(), extensions = "Buttons")
 
 
