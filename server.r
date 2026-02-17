@@ -340,8 +340,6 @@ server <- function(input, output, session) {
         Idents(seu) <- seu@meta.data[[cluster_name]]
       }
 
-
-
       # UMAP
       if (!"umap" %in% names(seu@reductions)) {
         append_log("Running UMAP...")
@@ -805,6 +803,101 @@ server <- function(input, output, session) {
     </ul>
     ")
   })
+
+    # ----------------------------------
+# proj signature with AddModuleScore
+# ----------------------------------
+
+    observeEvent(input$run_signature_projection, {
+
+      req(rv$seu)
+      req(input$signature_select)
+
+      seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
+
+      selected_sigs <- CancerRNASig::signatures$geneset[input$signature_select]
+
+      # filtre gènes présents
+      genes_present <- rownames(seu)
+
+      selected_sigs <- lapply(selected_sigs, function(sig) {
+        intersect(sig, genes_present)
+      })
+
+      append_log(paste(
+        "Running AddModuleScore for:",
+        paste(input$signature_select, collapse = ", ")
+      ))
+
+      seu <- AddModuleScore(
+        seu,
+        features = selected_sigs,
+        name = "SigScore_"
+      )
+
+      rv$signature_seu <- seu
+    })
+
+
+
+   output$signature_umap_plots <- renderUI({
+
+  req(rv$signature_seu)
+  req(input$signature_select)
+
+  n <- length(input$signature_select)
+
+  # max 2 colonnes pour garder de gros plots
+  ncol <- min(2, n)
+  col_width <- 12 / ncol
+
+  plot_list <- lapply(seq_len(n), function(i) {
+    plotname <- paste0("sig_plot_", i)
+
+    column(
+      width = col_width,
+      plotOutput(plotname, height = "600px")
+    )
+  })
+
+  rows <- split(plot_list, ceiling(seq_along(plot_list) / ncol))
+
+  do.call(tagList, lapply(rows, fluidRow))
+})
+
+
+
+    observe({
+
+    req(rv$signature_seu)
+    req(input$signature_select)
+
+    for (i in seq_along(input$signature_select)) {
+
+      local({
+        ii <- i
+        plotname <- paste0("sig_plot_", ii)
+
+        output[[plotname]] <- renderPlot({
+
+        feature_name <- paste0("SigScore_", ii)
+
+        p <- FeaturePlot(
+          rv$signature_seu,
+          features = feature_name,
+          reduction = "umap"
+        )
+
+        p +
+          scale_color_distiller(palette = "RdYlBu") +
+          coord_fixed() +
+          ggtitle(input$signature_select[ii])
+      })
+
+      })
+    }
+  })
+
 
 
     # -----------------------

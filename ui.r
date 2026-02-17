@@ -374,7 +374,7 @@ fluidRow(
               actionButton("run_markers", "Run Marker Analysis", icon = icon("dna"),
                 style = "background:#EC407A;color:white;"
               ),
-              plotOutput("umapMarkerPlot", height = "600px") %>% withSpinner()
+              plotOutput("umapMarkerPlot", height = "1200px") %>% withSpinner()
           ),
           box(width = 8, status = "info", solidHeader = TRUE,
               title = "Marker Results",
@@ -387,6 +387,44 @@ fluidRow(
           )
         )
       ),
+        tabPanel(
+            "Signature Projection",
+
+            fluidRow(
+              box(
+                width = 12,
+                title = "Signature selection",
+
+                selectizeInput(
+                  "signature_select",
+                  "Select signatures to project",
+                  choices = names(CancerRNASig::signatures$geneset),
+                  multiple = TRUE,
+                  options = list(
+                    placeholder = "Select one or more signatures"
+                  )
+                ),
+
+                actionButton(
+                  "run_signature_projection",
+                  "Run signature projection",
+                  icon = icon("play")
+                )
+              )
+            ),
+
+            fluidRow(
+              box(
+                width = 12,
+                title = "UMAP signature projection",
+                uiOutput("signature_umap_plots")
+              )
+            )
+
+            ),
+
+
+
         tabPanel("Cluster Annotation",
               fluidRow(
                 # Settings
