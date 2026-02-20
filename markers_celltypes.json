@@ -1,26 +1,30 @@
 {
-    "epithelial": [
-      "TFF1", "GATA6", "CLDN18", "MUC16", "S100A2", "KRT7", "KRT17", "KRT19",
-      "EPCAM", "MSLN", "MUC1", "TACSTD2", "LGALS4", "KRT8", "KRT18"
-    ],
-    "fibroblast": [
-      "ACTA2", "VIM", "COL6A1", "COL6A2", "COL1A1", "COL1A2", "COL3A1",
-      "TAGLN", "FAP", "PDGFRB", "THY1", "LUM", "DCN", "CXCL12"
-    ],
-    "prolif": [
-      "MKI67", "TOP2A", "PCNA", "BIRC5", "UBE2C", "CENPF", "MCM2", "MCM5"
-    ],
-    "immune": [
-      "CD3D", "CD3E", "CD4", "CD8A", "CD8B", "CD163", "CD68", "PTPRC", "MS4A1"
-    ],
-    "acinar": [
-      "PRSS1", "PRSS2", "CELA3A", "CELA3B", "CPA1", "CPA2", "REG1A", "REG1B",
-      "GP2", "PNLIP", "CTRB1", "CTRB2"
-    ],
-    "endothelial": [
-      "PECAM1", "VWF", "KDR", "ENG", "PLVAP", "EMCN", "ESAM"
-    ],
-    "hepatocytes": [
-      "ALB", "APOA1", "APOA2", "TTR", "FGB", "FGA", "SERPINA1", "CYP3A4", "CYP2E1"
-    ]
-  }
+  "epithelial_pancreas_ductal": ["KRT19", "KRT7", "CFTR", "SOX9", "HNF1B", "MUC1", "MUC6", "EPCAM"],
+  "epithelial_pancreas_acinar": ["PRSS1", "PRSS2", "CELA3A", "CELA3B", "CPA1", "CPA2", "REG1A", "REG1B", "GP2", "PNLIP", "CTRB1", "CTRB2", "AMY2A"],
+  "epithelial_pancreas_endocrine": ["INS", "GCG", "SST", "PPY", "GHRL", "CHGA", "CHGB"],
+  "epithelial_pancreas_PanNET": ["CHGA", "CHGB", "SYP", "NCAM1", "INSM1"],
+  "epithelial_liver_hepatocytes": ["ALB", "APOA1", "APOA2", "TTR", "FGB", "FGA", "SERPINA1", "CYP3A4", "CYP2E1", "CYP2C9"],
+  "epithelial_liver_cholangiocytes": ["KRT7", "KRT19", "SOX9", "CFTR", "HNF1B"],
+  "epithelial_stomach_surface_mucous": ["MUC5AC", "MUC6", "TFF1", "TFF2", "GIF", "ATP4A", "ATP4B", "PGC"],
+  "epithelial_stomach_enteroendocrine": ["CHGA", "CHGB", "NEUROD1", "GHRL", "SST", "PPY"],
+  "epithelial_stomach_goblet": ["MUC2", "TFF3", "FCGBP", "CLCA1"],
+  "epithelial_small_intestine_enterocytes": ["FABP2", "ALPI", "VIL1", "MUC2"],
+  "epithelial_small_intestine_goblet": ["MUC2", "TFF3", "FCGBP", "CLCA1"],
+  "epithelial_small_intestine_enteroendocrine": ["CHGA", "CHGB", "NEUROD1", "GHRL", "SST", "PPY"],
+  "epithelial_small_intestine_stem": ["LGR5", "OLFM4"],
+  "epithelial_small_intestine_proliferative": ["MKI67"],
+  "epithelial_colon_enterocytes": ["KRT20", "EPCAM", "FABP2", "ALPI"],
+  "epithelial_colon_goblet": ["MUC2", "TFF3", "FCGBP", "CLCA1"],
+  "epithelial_colon_enteroendocrine": ["CHGA", "CHGB", "NEUROD1", "GHRL", "SST", "PPY"],
+  "epithelial_colon_stem": ["LGR5", "OLFM4"],
+  "epithelial_colon_proliferative": ["MKI67"],
+  "stromal_fibroblast": ["ACTA2", "VIM", "COL6A1", "COL6A2", "COL1A1", "COL1A2", "COL3A1", "TAGLN", "FAP", "PDGFRB", "THY1", "LUM", "DCN", "CXCL12", "COL5A1", "COL5A2"],
+  "stromal_hepatic_stellate": ["ACTA2", "DES", "LRAT", "PDGFRB", "RBP1"],
+  "stromal_proliferative": ["MKI67", "TOP2A", "PCNA", "BIRC5", "UBE2C", "CENPF", "MCM2", "MCM5"],
+  "immune_T_cells": ["CD3D", "CD3E", "CD4", "CD8A", "CD8B", "FOXP3", "NKG7", "GNLY"],
+  "immune_B_cells": ["MS4A1", "CD19", "CD79A"],
+  "immune_monocytes_macrophages": ["CD14", "CD68", "CD163", "FCGR3A", "ITGAX"],
+  "immune_Kupffer_cells": ["CD68", "MARCO", "VSIG4", "CD163", "MSR1"],
+  "immune_NK_cells": ["NCAM1", "NKG7", "GNLY"],
+  "endothelial": ["PECAM1", "VWF", "KDR", "ENG", "PLVAP", "EMCN", "ESAM", "CD34", "FLT1", "TEK"]
+}
