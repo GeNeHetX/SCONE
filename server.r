@@ -1,6 +1,7 @@
 packages <- c(
   "shiny", "shinydashboard", "shinycssloaders", "magrittr", "shinyjs",
-  "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT"
+  "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT", 
+  "HGNChelper", "igraph", "ggraph"
 )
 new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
 if(length(new_packages)) {
@@ -30,6 +31,9 @@ library(shinyjs)
 library(gridExtra)
 library(jsonlite)
 library(DT)
+library(HGNChelper)
+library(igraph)
+library(ggraph)
 
 
 options(shiny.maxRequestSize = 100*1024^3)
@@ -983,6 +987,53 @@ output$sctype_umap_plot <- renderPlot({
     }
 })
 
+## -----------------------------
+## Circlepack pour ScType scores
+## -----------------------------
+output$sctype_circlepack_plot <- renderPlot({
+  req(rv$sctype_annotation)  # nécessite que l'annotation ScType ait été calculée
+
+  # edges : cluster → cell type
+  edges <- rv$sctype_annotation
+  edges <- edges[order(edges$cluster), ]
+  edges_long <- tidyr::pivot_longer(edges, cols = -c(cluster, ncells, label_max),
+                                    names_to = "type", values_to = "scores")
+  edges_long <- edges_long[edges_long$scores > 0, ]
+  edges_long$from <- paste0("cluster ", edges_long$cluster)
+  edges_long$to <- paste0(edges_long$type, "_", edges_long$cluster)
+  edges_final <- edges_long[, c("from", "to", "scores")]
+
+  # nodes : cluster + cell types
+  nodes_lvl1 <- unique(edges_final$from)
+  nodes_lvl1_df <- data.frame(
+    cluster = nodes_lvl1,
+    ncells = sapply(nodes_lvl1, function(x) sum(edges_final$scores[edges_final$from == x])),
+    Colour = "#f1f1ef",
+    ord = 1,
+    realname = nodes_lvl1,
+    stringsAsFactors = FALSE
+  )
+
+  nodes_lvl2_df <- data.frame(
+    cluster = edges_final$to,
+    ncells = edges_final$scores,
+    Colour = rep(RColorBrewer::brewer.pal(12, "Set3"), length.out = nrow(edges_final)),
+    ord = 2,
+    realname = edges_final$to,
+    stringsAsFactors = FALSE
+  )
+
+  nodes <- rbind(nodes_lvl1_df, nodes_lvl2_df)
+  mygraph <- graph_from_data_frame(d = edges_final[, c("from", "to")], vertices = nodes)
+
+  # plot
+  ggraph(mygraph, layout = 'circlepack', weight = I(ncells)) + 
+    geom_node_circle(aes(filter = ord == 1, fill = I("#F5F5F5"), colour = I("#D3D3D3")), alpha = 0.9) +
+    geom_node_circle(aes(filter = ord == 2, fill = I(Colour), colour = I("#D3D3D3")), alpha = 0.9) +
+    geom_node_text(aes(filter = ord == 2, label = realname), colour = "black", size = 5) +
+    geom_node_label(aes(filter = ord == 1, label = realname), colour = "black", size = 6, fill = "white") +
+    theme_void()
+})
 
 
     # ----------------------------------

@@ -424,9 +424,17 @@ tabPanel("Annotation (ScType)",
         
         hr(),
         uiOutput("sctype_info_text")
-    )
-  )
-),
+      )
+      ),
+      
+      # Circlepack below
+      fluidRow(
+        box(width = 12, status = "info", solidHeader = TRUE,
+            title = "Cell Type Scores Circlepack",
+            plotOutput("sctype_circlepack_plot", height = "1200px") %>% withSpinner()
+        )
+      )
+    ),
 
 
         tabPanel(
