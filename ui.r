@@ -359,8 +359,7 @@ fluidRow(
       ),
       tabPanel("Find Markers",
         fluidRow(
-          box(width = 4, status = "info", solidHeader = TRUE,
-              title = "Marker Settings",
+          box(width = 4, status = "info", solidHeader = TRUE, title = "Marker Settings",
               uiOutput("marker_split_meta_ui"),
               selectInput("marker_mode","Comparison mode",
                 choices = list(
@@ -374,7 +373,7 @@ fluidRow(
               actionButton("run_markers", "Run Marker Analysis", icon = icon("dna"),
                 style = "background:#EC407A;color:white;"
               ),
-              plotOutput("umapMarkerPlot", height = "1200px") %>% withSpinner()
+              plotOutput("umapMarkerPlot", height = "600px") %>% withSpinner()
           ),
           box(width = 8, status = "info", solidHeader = TRUE,
               title = "Marker Results",
@@ -387,6 +386,49 @@ fluidRow(
           )
         )
       ),
+tabPanel("Annotation (ScType)",
+  fluidRow(
+    box(width = 4, status = "info", solidHeader = TRUE,
+        title = "ScType Annotation Settings",
+        uiOutput("type_split_meta_ui"),  # selectInput dynamique pour metadata
+        
+        selectInput("sctype_tissue",
+          "Database of markers",
+          choices = c("Immune system", "Pancreas", "Lung", "Brain", "Liver", "Breast"),
+          selected = "Pancreas"
+        ),
+        
+        selectInput(
+          "sctype_color_by",
+          "Color by annotation",
+          choices = c("label_max"),  # on pourra ajouter d'autres colonnes plus tard
+          selected = "label_max"
+        ),
+        
+        actionButton(
+          "run_sctype_annotation",
+          "Run ScType Annotation",
+          icon = icon("database"),
+          style = "background:#26A69A;color:white;"
+        ),
+        
+        br(), br(),
+
+        plotOutput("sctype_umap_plot", height = "600px") %>% withSpinner()
+    ),
+    box(width = 8, status = "info", solidHeader = TRUE,
+        title = "Annotation Results",
+        
+        h4("Predicted cell types per cluster"),
+        dataTableOutput("sctype_table"),
+        
+        hr(),
+        uiOutput("sctype_info_text")
+    )
+  )
+),
+
+
         tabPanel(
             "Signature Projection",
 
@@ -425,7 +467,7 @@ fluidRow(
 
 
 
-        tabPanel("Cluster Annotation",
+        tabPanel("Manuel Annotation",
               fluidRow(
                 # Settings
                 box(width = 4, status = "info", solidHeader = TRUE,

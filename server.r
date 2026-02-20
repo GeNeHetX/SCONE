@@ -634,9 +634,7 @@ server <- function(input, output, session) {
     output$umapMarkerPlot <- renderPlot({
       req(rv$seu)
       req(input$marker_split_meta)
-
-      DimPlot(rv$seu, reduction = "umap", group.by = input$marker_split_meta, label = TRUE) +
-        theme_minimal()
+      DimPlot(rv$seu, reduction = "umap", group.by = input$marker_split_meta, label = TRUE) 
     })
 
     # calcul des markers
@@ -804,9 +802,192 @@ server <- function(input, output, session) {
     ")
   })
 
+##--------------------------
+# ScType Annotation Server
+##--------------------------
+
+# UI dynamique pour choisir metadata
+output$type_split_meta_ui <- renderUI({
+  req(rv$meta_choices)
+  selectInput(
+    "sctype_split_meta",
+    "Group cells by (metadata)",
+    choices = rv$meta_choices,
+    selected = "seurat_clusters"
+  )
+})
+
+# UMAP initial coloré par metadata choisie
+output$sctype_umap_plot <- renderPlot({
+  req(rv$seu)
+  req(input$sctype_split_meta)
+
+  seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
+  cluster_col <- input$sctype_split_meta
+
+  if (!cluster_col %in% colnames(seu@meta.data)) {
+    showNotification(paste("Column", cluster_col, "not found in Seurat object"), type = "error")
+    return()
+  }
+
+  Idents(seu) <- seu[[cluster_col]][,1]  # ident par metadata
+
+  DimPlot(seu, reduction = "umap", group.by = cluster_col, label = TRUE) 
+})
+
+# Lancer ScType
+observeEvent(input$run_sctype_annotation, {
+  req(rv$seu)
+  req(input$sctype_split_meta)
+
+  seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
+  cluster_col <- input$sctype_split_meta
+  Idents(seu) <- seu[[cluster_col]][,1]
+
+  withProgress(message = "Running ScType annotation...", value = 0, {
+
+    DefaultAssay(seu) <- "RNA"
+    seurat_package_v5 <- isFALSE('counts' %in% names(attributes(seu[["RNA"]])))
+    append_log(paste("Seurat object", ifelse(seurat_package_v5, "v5", "v4"), "detected"))
+    incProgress(0.05)
+
+    # Extraire matrice scalée
+    scRNAseqData_scaled <- if (seurat_package_v5) as.matrix(seu[["RNA"]]$scale.data) else as.matrix(seu[["RNA"]]@scale.data)
+    incProgress(0.1)
+
+    # Charger DB
+    db_url <- "https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_full.xlsx"
+    db_local <- file.path(tempdir(), "ScTypeDB_full.xlsx")
+    if (!file.exists(db_local)) download.file(db_url, db_local, mode = "wb")
+    gs_list <- gene_sets_prepare(db_local, input$sctype_tissue)
+    incProgress(0.2)
+
+    # ScType scoring
+    es.max <- sctype_score(
+      scRNAseqData = scRNAseqData_scaled,
+      scaled = TRUE,
+      gs = gs_list$gs_positive,
+      gs2 = gs_list$gs_negative
+    )
+    incProgress(0.5)
+
+    # Merge par cluster
+    clusters <- Idents(seu)
+    cL_results <- do.call("rbind", lapply(clusters, function(cl) {
+      cells_cl <- rownames(seu@meta.data[seu@meta.data[[cluster_col]] == cl, ])
+      es.max.cl <- sort(rowSums(es.max[, cells_cl, drop = FALSE]), decreasing = TRUE)
+      head(data.frame(
+        cluster = cl,
+        type = names(es.max.cl),
+        scores = es.max.cl,
+        ncells = length(cells_cl)
+      ), 10)
+    }))
+    incProgress(0.75)
+
+    # Pivot en wide
+    score_table <- tidyr::pivot_wider(
+      cL_results,
+      names_from = type,
+      values_from = scores,
+      values_fill = 0,
+      values_fn = list(scores = max)
+    )
+
+    # Vérifie colonnes
+    score_cols <- setdiff(colnames(score_table), c("cluster", "ncells"))
+    if (length(score_cols) == 0) stop("Aucune colonne de score détectée après pivot !")
+
+    # label_max
+    score_table$label_max <- apply(score_table[, score_cols], 1, function(x) names(x)[which.max(x)])
+
+    # Optionnel: Unknown si max < ncells/4
+    score_table$label_max <- mapply(function(max_score, ncells, label) {
+      if (max_score < ncells / 4) return("Unknown")
+      return(label)
+    }, max_score = apply(score_table[, score_cols], 1, max),
+       ncells = score_table$ncells,
+       label = score_table$label_max)
+
+    # Sauvegarde
+    rv$sctype_annotation <- score_table
+    incProgress(1)
+    append_log("ScType annotation completed.")
+  })
+})
+
+# Table ScType
+output$sctype_table <- DT::renderDataTable({
+  req(rv$sctype_annotation)
+  df <- rv$sctype_annotation
+  score_cols <- setdiff(colnames(df), c("cluster", "ncells", "label_max"))
+
+  # Colorer la colonne max par ligne
+  max_per_row <- apply(df[, score_cols], 1, function(x) names(x)[which.max(x)])
+
+  datatable(
+    df,
+    extensions = "Buttons",
+    rownames = FALSE,
+    options = list(
+      pageLength = 10,
+      scrollX = TRUE,
+      dom = "Bfrtip",
+      buttons = list(
+        list(extend = "copy", text = "Copy"),
+        list(extend = "csv", text = "CSV", filename = "sctype_scores"),
+        list(extend = "excel", text = "Excel", filename = "sctype_scores")
+      )
+    )
+  ) %>%
+    formatStyle(
+      columns = score_cols,
+      backgroundColor = styleEqual(max_per_row, rep('rgba(255,0,0,0.3)', length(max_per_row)))
+    )
+})
+
+# Recolorer UMAP après annotation
+output$sctype_umap_plot <- renderPlot({
+  req(rv$seu)
+  req(input$sctype_split_meta)
+
+  seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
+  cluster_col <- input$sctype_split_meta
+  Idents(seu) <- seu[[cluster_col]][,1]
+
+  if (!is.null(rv$sctype_annotation)) {
+    # Map cluster → label_max
+    label_map <- setNames(rv$sctype_annotation$label_max, rv$sctype_annotation$cluster)
+
+    # Crée ScType_label dans le metadata de Seurat
+    seu$ScType_label <- as.character(seu[[input$sctype_split_meta]][,1])  # commence avec les clusters existants
+    # Remplace par label_max selon le mapping
+    for (cl in names(label_map)) {
+    seu$ScType_label[seu[[input$sctype_split_meta]][,1] == cl] <- label_map[cl]
+    }
+
+    # Factor avec niveaux dans l'ordre de la table
+    seu$ScType_label <- factor(seu$ScType_label, levels = unique(rv$sctype_annotation$label_max))
+
+    # Maintenant on peut plot
+    DimPlot(seu, reduction = "umap", group.by = "ScType_label", label = TRUE) +
+      theme(
+            legend.position = "bottom",       # place la légende en bas
+            legend.title = element_text(size = 12),
+            legend.text  = element_text(size = 10),
+            plot.title = element_text(hjust = 0.5)
+  )
+
+    } else {
+        DimPlot(seu, reduction = "umap", group.by = cluster_col, label = TRUE) 
+    }
+})
+
+
+
     # ----------------------------------
-# proj signature with AddModuleScore
-# ----------------------------------
+    # proj signature with AddModuleScore
+    # ----------------------------------
 
     observeEvent(input$run_signature_projection, {
 
@@ -897,8 +1078,6 @@ server <- function(input, output, session) {
       })
     }
   })
-
-
 
     # -----------------------
     # Annotate manual clusters
