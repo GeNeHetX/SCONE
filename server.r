@@ -48,102 +48,189 @@ server <- function(input, output, session) {
     rv$log <- c(rv$log, txt)
   }
   output$tutorial_content <- renderUI({
-  HTML("
-        <h2>Single-Cell RNA-Seq Analysis with Seurat</h2>
+HTML("
+<h2>Single-Cell RNA-Seq Analysis with Seurat</h2>
 
-        <p>This tutorial explains step-by-step how to analyze single-cell RNA sequencing (scRNA-seq) data using the Seurat package in R. Each step includes explanations so beginners can understand what is happening.</p>
+<p>This tutorial explains step-by-step how to analyze single-cell RNA sequencing (scRNA-seq) data using the Seurat package in R. Each step includes explanations so beginners can understand what is happening.</p>
 
-        <hr>
+<hr>
 
-        <h3>1. Create a Seurat Object</h3>
-        <p>First, we need to create a Seurat object. This object stores all of your expression data and associated metadata. It is the foundation for all downstream analysis.</p>
-        <pre><code class='r'>
-        library(Seurat)
-        # 'expressionMatrix' is your raw count matrix (genes x cells)
-        seu <- CreateSeuratObject(counts = expressionMatrix)
-        </code></pre>
+<h3>1. Create a Seurat Object</h3>
+<p>First, we create a Seurat object. This object stores your expression data and metadata and is the foundation for downstream analysis.</p>
+<pre><code class='r'>
+library(Seurat)
+# 'expressionMatrix' is your raw count matrix (genes x cells)
+seu <- CreateSeuratObject(counts = expressionMatrix)
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>2. Quality Control (QC)</h3>
-        <p>QC is critical to remove poor-quality cells. Cells with very few genes detected might be dead or broken. Cells with too many genes could be doublets (two cells counted as one). We also often remove cells with high mitochondrial gene content because they indicate stressed or dying cells.</p>
-        <pre><code class='r'>
-        # Filter out low-quality cells
-        seu <- subset(seu, subset = nFeature_RNA &gt; 200 &amp;&amp; nFeature_RNA &lt; 5000 &amp;&amp; percent.mt &lt; 10)
-        </code></pre>
+<h3>2. Quality Control (QC)</h3>
+<p>QC removes poor-quality cells. Cells with too few or too many genes, or high mitochondrial content, are filtered out.</p>
+<pre><code class='r'>
+seu <- subset(seu, subset = nFeature_RNA &gt; 200 &amp;&amp; nFeature_RNA &lt; 5000 &amp;&amp; percent.mt &lt; 10)
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>3. Normalize the Data</h3>
-        <p>Normalization adjusts for differences in sequencing depth between cells. It ensures that the gene expression values are comparable across all cells.</p>
-        <pre><code class='r'>
-        seu <- NormalizeData(seu)
-        </code></pre>
+<h3>3. Normalize the Data</h3>
+<p>Normalization adjusts for differences in sequencing depth between cells.</p>
+<pre><code class='r'>
+seu <- NormalizeData(seu)
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>4. Identify Highly Variable Genes</h3>
-        <p>We select genes that show high variation across cells. These are the most informative genes for understanding cell types and states. Using only these genes reduces noise and speeds up computations.</p>
-        <pre><code class='r'>
-        seu <- FindVariableFeatures(seu, selection.method = 'vst', nfeatures = 2000)
-        </code></pre>
+<h3>4. Identify Highly Variable Genes</h3>
+<p>We select genes with high variation across cells; these are most informative for clustering.</p>
+<pre><code class='r'>
+seu <- FindVariableFeatures(seu, selection.method = 'vst', nfeatures = 2000)
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>5. Scale the Data</h3>
-        <p>Scaling centers and scales each gene's expression. This step is important because PCA and clustering assume data are scaled. Without scaling, highly expressed genes would dominate the analysis.</p>
-        <pre><code class='r'>
-        seu <- ScaleData(seu)
-        </code></pre>
+<h3>5. Scale the Data</h3>
+<p>Scaling centers and scales gene expression values; necessary for PCA and clustering.</p>
+<pre><code class='r'>
+seu <- ScaleData(seu)
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>6. Perform PCA (Dimensionality Reduction)</h3>
-        <p>PCA (Principal Component Analysis) reduces the dataset's complexity by summarizing the variation into principal components (PCs). These PCs capture the most important patterns in the data.</p>
-        <pre><code class='r'>
-        seu <- RunPCA(seu, npcs = 20)
-        </code></pre>
+<h3>6. Perform PCA (Dimensionality Reduction)</h3>
+<p>PCA summarizes variation into principal components (PCs) capturing the main patterns in the data.</p>
+<pre><code class='r'>
+seu <- RunPCA(seu, npcs = 20)
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>7. Clustering</h3>
-        <p>We group similar cells together. Seurat allows two methods:</p>
-        <ul>
-        <li><strong>Louvain clustering</strong> finds clusters based on nearest-neighbor graphs of cells.</li>
-        <li><strong>K-means clustering</strong> divides cells into a pre-defined number of clusters based on PCA embeddings.</li>
-        </ul>
-        <pre><code class='r'>
-        # Louvain clustering
-        seu <- FindNeighbors(seu, dims = 1:20)
-        seu <- FindClusters(seu, resolution = 0.5)
+<h3>7. Clustering</h3>
+<p>Group similar cells. Seurat supports multiple clustering methods:</p>
+<ul>
+<li><strong>Leiden clustering</strong> detects communities on a nearest-neighbor graph (recommended).</li>
+<li><strong>Louvain clustering</strong> is an alternative modularity-based method.</li>
+<li><strong>K-means clustering</strong> partitions cells into a pre-defined number of clusters.</li>
+</ul>
+<pre><code class='r'>
+# Compute nearest neighbors graph
+seu <- FindNeighbors(seu, dims = 1:20)
 
-        # OR K-means clustering
-        pca_emb <- Embeddings(seu, 'pca')[, 1:20]
-        km <- kmeans(pca_emb, centers = 10)
-        seu$kmeans_clusters <- as.factor(km$cluster)
-        Idents(seu) <- seu$kmeans_clusters
-        </code></pre>
+# Leiden clustering
+seu <- FindClusters(seu, resolution = 0.5, algorithm = 4)  # algorithm = 4 → Leiden
 
-        <hr>
+# Optional Louvain clustering
+# seu <- FindClusters(seu, resolution = 0.5, algorithm = 1)
 
-        <h3>8. Visualize with UMAP</h3>
-        <p>UMAP projects cells into 2D space so we can visually inspect clusters. Each point represents a single cell, and cells in the same cluster often group together in this plot.</p>
-        <pre><code class='r'>
-        seu <- RunUMAP(seu, dims = 1:20)
-        DimPlot(seu, reduction = 'umap', label = TRUE)
-        </code></pre>
+# K-means clustering (optional)
+pca_emb <- Embeddings(seu, 'pca')[, 1:20]
+km <- kmeans(pca_emb, centers = 10)
+seu$kmeans_clusters <- as.factor(km$cluster)
+Idents(seu) <- seu$kmeans_clusters
+</code></pre>
 
-        <hr>
+<hr>
 
-        <h3>Notes for Beginners</h3>
-        <ul>
-        <li>Always inspect your data after each step.</li>
-        <li>QC is crucial: low-quality or doublet cells can bias your results.</li>
-        <li>Variable features should capture the most biologically meaningful differences between cells.</li>
-        <li>PCA reduces noise and speeds up clustering.</li>
-        <li>UMAP or t-SNE plots are useful for visually exploring your data and understanding clusters.</li>
-        </ul>
-    ")
+<h3>8. Visualize with UMAP</h3>
+<p>UMAP projects cells into 2D space. Points represent cells; clusters are visually identifiable.</p>
+<pre><code class='r'>
+seu <- RunUMAP(seu, dims = 1:20)
+DimPlot(seu, reduction = 'umap', label = TRUE)
+</code></pre>
+
+<hr>
+
+<h3>9. Find marker genes per cluster</h3>
+<p>Identify genes highly expressed in each cluster for annotation or pathway analysis.</p>
+<pre><code class='r'>
+markers <- FindAllMarkers(
+    seu,
+    only.pos = TRUE,
+    min.pct = 0.25,
+    logfc.threshold = 0.25
+)
+head(markers)
+</code></pre>
+
+<hr>
+
+<h3>10. ScType annotation</h3>
+<p>
+<ScType> is a computational method for automated marker gene selection based only on scRNA-seq data. 
+The open-source portal <a href=\"http://sctype.app\" target=\"_blank\">http://sctype.app</a> provides an interactive web implementation. 
+Reference: <a href=\"https://doi.org/10.1038/s41467-022-28803-w\" target=\"_blank\">Ianevski et al., 2022, Nature Communications</a>.
+</p>
+<pre><code class='r'>
+# Ensure cluster identities are set
+Idents(seu) <- seu$seurat_clusters
+
+# Load ScType database
+db_url <- 'https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_full.xlsx'
+db_local <- file.path(tempdir(), 'ScTypeDB_full.xlsx')
+if (!file.exists(db_local)) download.file(db_url, db_local, mode = 'wb')
+
+gs_list <- gene_sets_prepare(db_local, tissue = 'Pancreas')  # change tissue if needed
+
+# Prepare scaled RNA matrix
+if(is.null(seu[['RNA']]$scale.data)) {
+    seu <- ScaleData(seu, features = rownames(seu))
+}
+scRNAseqData_scaled <- as.matrix(seu[['RNA']]$scale.data)
+
+# Run ScType scoring
+es.max <- sctype_score(
+    scRNAseqData = scRNAseqData_scaled,
+    scaled = TRUE,
+    gs = gs_list$gs_positive,
+    gs2 = gs_list$gs_negative
+)
+
+# Aggregate scores per cluster
+clusters <- unique(as.character(Idents(seu)))
+cL_results <- do.call('rbind', lapply(clusters, function(cl) {
+    cells_cl <- colnames(seu)[Idents(seu) == cl]
+    scores_cluster <- rowSums(es.max[, cells_cl, drop = FALSE])
+    scores_cluster <- sort(scores_cluster, decreasing = TRUE)
+    head(data.frame(
+        cluster = cl,
+        type = names(scores_cluster),
+        scores = scores_cluster,
+        ncells = length(cells_cl),
+        stringsAsFactors = FALSE
+    ), 10)
+}))
+
+# Pivot wide and assign label_max
+score_table <- tidyr::pivot_wider(
+    cL_results,
+    names_from = type,
+    values_from = scores,
+    values_fill = 0,
+    values_fn = list(scores = max)
+)
+score_cols <- setdiff(colnames(score_table), c('cluster', 'ncells'))
+score_matrix <- as.matrix(score_table[, score_cols])
+max_scores <- apply(score_matrix, 1, max)
+max_labels <- score_cols[max.col(score_matrix, ties.method = 'first')]
+score_table$label_max <- ifelse(max_scores < score_table$ncells / 4, 'Unknown', max_labels)
+
+# Save results
+rv$sctype_annotation <- score_table
+</code></pre>
+
+<hr>
+
+<h3>Notes for Beginners</h3>
+<ul>
+<li>Always inspect your data after each step.</li>
+<li>Quality control is crucial: low-quality or doublet cells can bias results.</li>
+<li>Variable features should capture biologically meaningful differences.</li>
+<li>PCA reduces noise and speeds up clustering.</li>
+<li>UMAP or t-SNE plots help visually explore clusters.</li>
+<li>After clustering, marker genes guide interpretation and ScType annotation.</li>
+</ul>
+")
+
     })
 
   observeEvent(input$show_tutorial, {
@@ -823,73 +910,145 @@ output$type_split_meta_ui <- renderUI({
 
 # UMAP initial coloré par metadata choisie
 output$sctype_umap_plot <- renderPlot({
+
   req(rv$seu)
   req(input$sctype_split_meta)
 
-  seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
+  seu <- rv$seu
   cluster_col <- input$sctype_split_meta
 
-  if (!cluster_col %in% colnames(seu@meta.data)) {
-    showNotification(paste("Column", cluster_col, "not found in Seurat object"), type = "error")
+  if (!(cluster_col %in% colnames(seu@meta.data))) {
+    showNotification(
+      paste("Column", cluster_col, "not found in Seurat object"),
+      type = "error"
+    )
     return()
   }
 
-  Idents(seu) <- seu[[cluster_col]][,1]  # ident par metadata
+  Idents(seu) <- seu@meta.data[[cluster_col]]
 
-  DimPlot(seu, reduction = "umap", group.by = cluster_col, label = TRUE) 
+  if (!is.null(rv$sctype_annotation)) {
+
+    label_map <- setNames(rv$sctype_annotation$label_max, rv$sctype_annotation$cluster)
+    seu$ScType_label <- as.character(seu@meta.data[[cluster_col]])
+    for (cl in names(label_map)) {
+      seu$ScType_label[seu@meta.data[[cluster_col]] == cl] <- label_map[cl]
+    }
+    DimPlot(seu, reduction = "umap", group.by = "ScType_label", label = TRUE
+    ) +       theme(
+            legend.position = "bottom",       # place la légende en bas
+            legend.title = element_text(size = 12),
+            legend.text  = element_text(size = 10),
+            plot.title = element_text(hjust = 0.5)
+  )
+  } else {
+
+    DimPlot(
+      seu,
+      reduction = "umap",
+      group.by = cluster_col,
+      label = TRUE
+    )
+  }
 })
 
-# Lancer ScType
+
+# ==============================
+# Lancer ScType (subset + full)
+# ==============================
 observeEvent(input$run_sctype_annotation, {
+
   req(rv$seu)
   req(input$sctype_split_meta)
 
-  seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
+  seu <- rv$seu
   cluster_col <- input$sctype_split_meta
-  Idents(seu) <- seu[[cluster_col]][,1]
+
+  if (!(cluster_col %in% colnames(seu@meta.data))) {
+    showNotification(
+      paste("Column", cluster_col, "not found in Seurat object"),
+      type = "error"
+    )
+    return()
+  }
+
+  Idents(seu) <- seu@meta.data[[cluster_col]]
 
   withProgress(message = "Running ScType annotation...", value = 0, {
 
+    # ==============================
+    # Assay RNA
+    # ==============================
     DefaultAssay(seu) <- "RNA"
     seurat_package_v5 <- isFALSE('counts' %in% names(attributes(seu[["RNA"]])))
+
     append_log(paste("Seurat object", ifelse(seurat_package_v5, "v5", "v4"), "detected"))
     incProgress(0.05)
 
-    # Extraire matrice scalée
-    scRNAseqData_scaled <- if (seurat_package_v5) as.matrix(seu[["RNA"]]$scale.data) else as.matrix(seu[["RNA"]]@scale.data)
+    # ==============================
+    # Extraire scale.data (ou recalculer si vide)
+    # ==============================
+    if (is.null(seu[["RNA"]]$scale.data) || ncol(seu[["RNA"]]$scale.data) == 0) {
+      append_log("scale.data absent ou vide — recalcul avec ScaleData()")
+      seu <- ScaleData(seu, features = rownames(seu), verbose = FALSE)
+    }
+
+    scRNAseqData_scaled <- as.matrix(seu[["RNA"]]$scale.data)
+
+    if (nrow(scRNAseqData_scaled) == 0 || ncol(scRNAseqData_scaled) == 0) {
+      stop("Erreur : scale.data vide même après ScaleData()")
+    }
     incProgress(0.1)
 
-    # Charger DB
+    # ==============================
+    # Charger base ScType
+    # ==============================
     db_url <- "https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_full.xlsx"
     db_local <- file.path(tempdir(), "ScTypeDB_full.xlsx")
     if (!file.exists(db_local)) download.file(db_url, db_local, mode = "wb")
     gs_list <- gene_sets_prepare(db_local, input$sctype_tissue)
     incProgress(0.2)
 
+    # ==============================
     # ScType scoring
+    # ==============================
     es.max <- sctype_score(
       scRNAseqData = scRNAseqData_scaled,
       scaled = TRUE,
       gs = gs_list$gs_positive,
       gs2 = gs_list$gs_negative
     )
+    # Ne garder que les cellules du subset
+    es.max <- es.max[, colnames(seu), drop = FALSE]
     incProgress(0.5)
 
-    # Merge par cluster
-    clusters <- Idents(seu)
+    # ==============================
+    # Agrégation par cluster
+    # ==============================
+    clusters <- unique(as.character(Idents(seu)))
+
     cL_results <- do.call("rbind", lapply(clusters, function(cl) {
-      cells_cl <- rownames(seu@meta.data[seu@meta.data[[cluster_col]] == cl, ])
-      es.max.cl <- sort(rowSums(es.max[, cells_cl, drop = FALSE]), decreasing = TRUE)
+      cells_cl <- colnames(seu)[Idents(seu) == cl]
+      if (length(cells_cl) == 0) return(NULL)
+      scores_cluster <- rowSums(es.max[, cells_cl, drop = FALSE])
+      scores_cluster <- sort(scores_cluster, decreasing = TRUE)
       head(data.frame(
         cluster = cl,
-        type = names(es.max.cl),
-        scores = es.max.cl,
-        ncells = length(cells_cl)
+        type = names(scores_cluster),
+        scores = scores_cluster,
+        ncells = length(cells_cl),
+        stringsAsFactors = FALSE
       ), 10)
     }))
+
+    if (is.null(cL_results) || nrow(cL_results) == 0) {
+      stop("No ScType scores generated.")
+    }
     incProgress(0.75)
 
-    # Pivot en wide
+    # ==============================
+    # Pivot wide
+    # ==============================
     score_table <- tidyr::pivot_wider(
       cL_results,
       names_from = type,
@@ -898,29 +1057,34 @@ observeEvent(input$run_sctype_annotation, {
       values_fn = list(scores = max)
     )
 
-    # Vérifie colonnes
     score_cols <- setdiff(colnames(score_table), c("cluster", "ncells"))
-    if (length(score_cols) == 0) stop("Aucune colonne de score détectée après pivot !")
+    if (length(score_cols) == 0) stop("No score columns detected after pivot.")
 
-    # label_max
-    score_table$label_max <- apply(score_table[, score_cols], 1, function(x) names(x)[which.max(x)])
+    # ==============================
+    # Label max
+    # ==============================
+    score_matrix <- as.matrix(score_table[, score_cols])
+    max_scores <- apply(score_matrix, 1, max)
+    max_labels <- score_cols[max.col(score_matrix, ties.method = "first")]
 
-    # Optionnel: Unknown si max < ncells/4
-    score_table$label_max <- mapply(function(max_score, ncells, label) {
-      if (max_score < ncells / 4) return("Unknown")
-      return(label)
-    }, max_score = apply(score_table[, score_cols], 1, max),
-       ncells = score_table$ncells,
-       label = score_table$label_max)
+    score_table$label_max <- ifelse(
+      max_scores < score_table$ncells / 4,
+      "Unknown",
+      max_labels
+    )
 
+    # ==============================
     # Sauvegarde
+    # ==============================
     rv$sctype_annotation <- score_table
     incProgress(1)
     append_log("ScType annotation completed.")
   })
 })
 
+# ==============================
 # Table ScType
+# ==============================
 output$sctype_table <- DT::renderDataTable({
   req(rv$sctype_annotation)
   df <- rv$sctype_annotation
@@ -950,42 +1114,6 @@ output$sctype_table <- DT::renderDataTable({
     )
 })
 
-# Recolorer UMAP après annotation
-output$sctype_umap_plot <- renderPlot({
-  req(rv$seu)
-  req(input$sctype_split_meta)
-
-  seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu
-  cluster_col <- input$sctype_split_meta
-  Idents(seu) <- seu[[cluster_col]][,1]
-
-  if (!is.null(rv$sctype_annotation)) {
-    # Map cluster → label_max
-    label_map <- setNames(rv$sctype_annotation$label_max, rv$sctype_annotation$cluster)
-
-    # Crée ScType_label dans le metadata de Seurat
-    seu$ScType_label <- as.character(seu[[input$sctype_split_meta]][,1])  # commence avec les clusters existants
-    # Remplace par label_max selon le mapping
-    for (cl in names(label_map)) {
-    seu$ScType_label[seu[[input$sctype_split_meta]][,1] == cl] <- label_map[cl]
-    }
-
-    # Factor avec niveaux dans l'ordre de la table
-    seu$ScType_label <- factor(seu$ScType_label, levels = unique(rv$sctype_annotation$label_max))
-
-    # Maintenant on peut plot
-    DimPlot(seu, reduction = "umap", group.by = "ScType_label", label = TRUE) +
-      theme(
-            legend.position = "bottom",       # place la légende en bas
-            legend.title = element_text(size = 12),
-            legend.text  = element_text(size = 10),
-            plot.title = element_text(hjust = 0.5)
-  )
-
-    } else {
-        DimPlot(seu, reduction = "umap", group.by = cluster_col, label = TRUE) 
-    }
-})
 
 ## -----------------------------
 ## Circlepack pour ScType scores
