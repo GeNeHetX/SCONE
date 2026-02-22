@@ -256,6 +256,7 @@ fluidRow(
         fluidRow(
           box(width = 12, status = "info", solidHeader = TRUE,
               title = "QC Metrics",
+              selectInput(inputId = "qc_split_meta",label = "Split QC plots by metadata:", choices = NULL, selected = NULL ),
               plotOutput("qc_violin", height = "600px") %>% withSpinner()
           ),
           box(width = 6, status = "info", solidHeader = TRUE,
@@ -265,6 +266,14 @@ fluidRow(
           box(width = 6, status = "info", solidHeader = TRUE,
               title = "nCount vs percent.mt",
               plotOutput("qc_scatter2", height = "500px") %>% withSpinner()
+          ),
+           box(width = 6, status = "info", solidHeader = TRUE,
+              title = "UMI vs Gene",
+              plotOutput("qc_scatter3", height = "500px") %>% withSpinner()
+          ),
+          box(width = 6, status = "info", solidHeader = TRUE,
+              title = "UMI vs Gene median gradient",
+              plotOutput("qc_scatter4", height = "500px") %>% withSpinner()
           )
         ),
         fluidRow(
@@ -500,9 +509,43 @@ tabPanel("Annotation (ScType)",
                     plotOutput("annot_umap", height = "600px") %>% withSpinner()
                 )
               )
-            
+            ),
 
-                    )
+            tabPanel("Pseudobulk Analysis",
+                fluidRow(
+                  box(
+                    width = 3, status = "info", solidHeader = TRUE,
+                    title = "Pseudobulk Settings",
+                    selectInput(
+                      "split_meta", 
+                      label = "Select metadata for splitting samples:", 
+                      choices = NULL,   # à remplir dynamiquement avec colnames(rv$seu@meta.data)
+                      selected = NULL
+                    ),
+                    selectInput(
+                      "annot_meta",
+                      label = "Select metadata for annotations:",
+                      choices = NULL,  # à remplir dynamiquement
+                      selected = NULL
+                    ),
+                    # Choix du K pour Monocle3
+                    sliderInput(
+                      "k_monocle",
+                      label = "Select k for Monocle3 clustering:", min = 2,max = 10, value = 3,step = 1
+                    ),
+                    actionButton(
+                      "run_pseudobulk", "Run Pseudobulk Analysis", icon = icon("play-circle"), style = "background:#4CAF50; color:white;"
+                    ),
+                    downloadButton("download_pseudobulk_pdf", "Download Heatmap PDF")
+                  ),
+                  box(
+                    width = 9, status = "info", solidHeader = TRUE,
+                    title = "Pseudobulk Correlation Heatmap",
+                    plotOutput("pseudobulk_heatmap", height = "1200px") %>% shinycssloaders::withSpinner()
+                  )
+                )
+              )
+
                 )
             )
         )
