@@ -352,6 +352,7 @@ observeEvent(input$input_zip, {
       features = genes_file,
       feature.column = 1,
       skip.cell = 1,
+      skip.feature = 1,
       cell.sep = "\t"
     )
 
