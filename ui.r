@@ -432,22 +432,31 @@ tabPanel("Annotation (ScType)",
 
         tabPanel(
             "Signature Projection",
-
             fluidRow(
               box(
                 width = 12,
                 title = "Signature selection",
-
-                selectizeInput(
-                  "signature_select",
-                  "Select signatures to project",
-                  choices = names(CancerRNASig::signatures$geneset),
-                  multiple = TRUE,
-                  options = list(
-                    placeholder = "Select one or more signatures"
+                fluidRow(
+                  column(6,
+                    fileInput("custom_sig_file", "Load custom signatures (Excel .xlsx) — one signature per column", accept = ".xlsx"),
+                    selectizeInput(
+                      "custom_sig_select",
+                      "Select signatures from your project",
+                      choices  = NULL,
+                      multiple = TRUE,
+                      options  = list(placeholder = "Upload a file first")
+                    )
+                  ),
+                  column(6,
+                    selectizeInput(
+                      "signature_select",
+                      "Select signatures from CancerRNASig",
+                      choices  = names(CancerRNASig::signatures$geneset),
+                      multiple = TRUE,
+                      options  = list(placeholder = "Select one or more signatures")
+                    )
                   )
                 ),
-
                 actionButton(
                   "run_signature_projection",
                   "Run signature projection",
@@ -455,7 +464,6 @@ tabPanel("Annotation (ScType)",
                 )
               )
             ),
-
             fluidRow(
               box(
                 width = 12,
@@ -463,9 +471,7 @@ tabPanel("Annotation (ScType)",
                 uiOutput("signature_umap_plots")
               )
             )
-
-            ),
-
+          ),
 
 
         tabPanel("Manuel Annotation",

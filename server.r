@@ -103,10 +103,42 @@ server <- function(input, output, session) {
           <hr>
 
           <h3>2. Quality Control (QC)</h3>
-          <p>QC removes poor-quality cells. Cells with too few or too many genes, or high mitochondrial content, are filtered out.</p>
-          <pre><code class='r'>
-          seu <- subset(seu, subset = nFeature_RNA &gt; 200 &amp;&amp; nFeature_RNA &lt; 5000 &amp;&amp; percent.mt &lt; 10)
-          </code></pre>
+          <p>QC identifies and removes low-quality cells before analysis. Four metrics are visualized as violin plots, each with a red dashed line indicating the filtering threshold. Thresholds should always be set by visually inspecting the violin plots for your dataset.</p>
+
+          <h4>nFeature_RNA - Number of detected genes per cell</h4>
+          <p>Counts the number of unique genes detected in each cell, meaning genes with at least 1 UMI count. This is the most direct measure of cell quality.</p>
+          <ul>
+            <li><b>Too low</b>: empty droplet, dead cell, or poor RNA capture.</li>
+            <li><b>Too high</b>: likely a doublet, two cells captured in the same droplet.</li>
+          </ul>
+          <pre><code class='r'>seu &lt;- subset(seu, subset = nFeature_RNA &gt; 600 &amp;&amp; nFeature_RNA &lt; 5500)</code></pre>
+
+          <h4>nCount_RNA - Total UMI count per cell</h4>
+          <p>A UMI (Unique Molecular Identifier) is a short random barcode attached to each RNA molecule before PCR amplification. UMI counts represent the number of original molecules captured, correcting for PCR duplicates. nCount_RNA is the total number of UMIs detected in a cell and reflects overall transcriptional activity.</p>
+          <ul>
+            <li><b>Too low</b>: poor RNA capture, empty droplet, or a dying cell with degraded RNA.</li>
+            <li><b>Too high</b>: likely a doublet, or a very large and highly active cell.</li>
+          </ul>
+          <pre><code class='r'>seu &lt;- subset(seu, subset = nCount_RNA &gt; 1200 &amp;&amp; nCount_RNA &lt; 45000)</code></pre>
+
+          <h4>percent.mt - Mitochondrial gene percentage</h4>
+          <p>Proportion of UMIs mapping to mitochondrial genes (prefixed MT-). Mitochondria have their own genome and produce their own RNA independently of the nucleus.</p>
+          <p>High mitochondrial content can have two very different causes:</p>
+          <ul>
+            <li><b>Cell damage or lysis</b>: when a cell membrane is disrupted, cytoplasmic RNA leaks out of the droplet. Mitochondria, being membrane-bound organelles, are retained longer and their RNA becomes over-represented. This is a technical artifact.</li>
+            <li><b>Organelle burst</b>: the nucleus is intact but the cytoplasm has been lost, leaving only mitochondrial RNA.</li>
+            <li><b>Tumor or metabolically active cells</b>: some cancer cells, particularly those relying on oxidative phosphorylation, genuinely express high levels of mitochondrial transcripts. In this case, high percent.mt is a biological signal and not an artifact. A strict threshold may inadvertently remove real cancer cells.</li>
+          </ul>
+          <p>The threshold must be adapted to your tissue and biological context. A cutoff of 10% is standard for healthy tissue but may need to be relaxed to 20-30% in tumor samples.</p>
+          <pre><code class='r'>seu &lt;- subset(seu, subset = percent.mt &lt; 20)</code></pre>
+
+          <h4>Complexity - nFeature_RNA divided by nCount_RNA</h4>
+          <p>This ratio measures transcriptional complexity: how many distinct genes are detected per UMI captured. A complex cell expresses many different genes at moderate levels, while a low-complexity cell expresses very few genes at very high levels.</p>
+          <ul>
+            <li><b>High complexity (close to 1)</b>: each UMI maps to a different gene, indicating a rich and diverse transcriptome.</li>
+            <li><b>Low complexity (close to 0)</b>: many UMIs mapping to very few genes. Typical of red blood cells, empty droplets, or highly specialized cells.</li>
+          </ul>
+          <pre><code class='r'>seu &lt;- subset(seu, subset = nFeature_RNA &gt; 600 &amp;&amp; nFeature_RNA &lt; 5500 &amp;&amp; nCount_RNA &gt; 1200 &amp;&amp; nCount_RNA &lt; 45000 &amp;&amp; percent.mt &lt; 20)</code></pre>
 
           <hr>
 
@@ -496,7 +528,7 @@ observeEvent(input$input_zip, {
         req(rv$seu)
         
         # toutes les colonnes dynamiques + base
-        all_cols <- c(rv$meta_base, grep("sampleID|^published|^(louvain_|kmeans_|leiden_)", 
+        all_cols <- c(rv$meta_base, grep("sampleID|^published|^(louvain_|kmeans_|leiden_|sctype_|manual_)", 
                                         colnames(rv$seu@meta.data), value = TRUE))
         
         base_names <- sub("\\.\\d+$", "", all_cols)
@@ -1142,15 +1174,16 @@ observeEvent(input$input_zip, {
   ##--------------------------
 
   # UI dynamique pour choisir metadata
-  output$type_split_meta_ui <- renderUI({
-    req(rv$meta_choices)
-    selectInput(
-      "sctype_split_meta",
-      "Group cells by (metadata)",
-      choices = rv$meta_choices,
-      selected = "seurat_clusters"
-    )
-  })
+ output$type_split_meta_ui <- renderUI({
+  req(rv$meta_choices)
+  sorted_choices <- sort(rv$meta_choices)
+  selectInput(
+    "sctype_split_meta",
+    "Group cells by (metadata)",
+    choices = sorted_choices,
+    selected = sorted_choices[1]
+  )
+})
 
   # UMAP initial coloré par metadata choisie
   output$sctype_umap_plot <- renderPlot({
@@ -1299,6 +1332,15 @@ observeEvent(input$input_zip, {
     rv$sctype_annotation <- score_table
     incProgress(1)
     append_log("ScType annotation completed.")
+    rv$sctype_annotation <- score_table
+
+    # Ajouter label_max au meta.data
+    cluster_to_label <- setNames(score_table$label_max, score_table$cluster)
+    seu@meta.data$sctype_annot <- cluster_to_label[as.character(seu@meta.data[[cluster_col]])]
+    rv$seu <- seu
+    rv$meta_choices <- colnames(seu@meta.data)
+
+    append_log("ScType labels added to meta.data as sctype_annot.")
   })
 })
 
@@ -1383,117 +1425,139 @@ observeEvent(input$input_zip, {
         theme_void()
     })
 
+# ----------------------------------
+# proj signature with AddModuleScore
+# ----------------------------------
 
-    # ----------------------------------
-    # proj signature with AddModuleScore
-    # ----------------------------------
-      observeEvent(input$run_signature_projection, {
+# ---- Signatures custom ----
+custom_signatures <- reactiveVal(list())
 
-        req(rv$seu)
-        req(input$signature_select)
-        seu_full <- rv$seu
-        cells_subset <- if(!is.null(rv$subset_cells)) Cells(rv$subset_cells) else Cells(seu_full)
+observeEvent(input$custom_sig_file, {
+  req(input$custom_sig_file)
+  df <- openxlsx::read.xlsx(input$custom_sig_file$datapath)
+  sig_list <- lapply(df, function(col) col[!is.na(col) & col != ""])
+  custom_signatures(sig_list)
+  updateSelectizeInput(session, "custom_sig_select", choices = names(sig_list))
+  append_log(paste("Custom signatures loaded:", paste(names(sig_list), collapse = ", ")))
+})
 
-        seu <- subset(
-          x = seu_full,
-          cells = cells_subset
-        )
-        for (red in Reductions(seu_full)) {
-          if (red %in% Reductions(seu_full)) {
-            seu[[red]] <- subset(seu_full[[red]], cells = Cells(seu))
-          }
-        }
-        for (g in names(seu_full@graphs)) {
-          seu@graphs[[g]] <- seu_full@graphs[[g]][Cells(seu), Cells(seu)]
-        }
-        selected_sigs <- CancerRNASig::signatures$geneset[input$signature_select]
-        genes_present <- rownames(seu)
-        selected_sigs <- lapply(selected_sigs, function(sig) intersect(sig, genes_present))
-        selected_sigs <- selected_sigs[sapply(selected_sigs, length) > 0]
+# ---- Run AddModuleScore ----
+observeEvent(input$run_signature_projection, {
 
-        if(length(selected_sigs) == 0){
-          showNotification("No genes from selected signature found in Seurat object.", type = "error")
-          return()
-        }
-        append_log(paste("Running AddModuleScore for:", paste(names(selected_sigs), collapse = ", ")))
-        seu <- AddModuleScore(
-          object = seu,
-          features = selected_sigs,
-          name = "SigScore_"
-        )
-        rv$signature_seu <- seu
-      })
+  req(rv$seu)
 
+  # Fusionner les deux selections
+  selected_builtin <- input$signature_select
+  selected_custom  <- input$custom_sig_select
+  all_selected     <- c(selected_builtin, selected_custom)
 
-   output$signature_umap_plots <- renderUI({
+  if (length(all_selected) == 0) {
+    showNotification("Please select at least one signature.", type = "error")
+    return()
+  }
 
-      req(rv$signature_seu)
-      req(input$signature_select)
+  seu_full     <- rv$seu
+  cells_subset <- if (!is.null(rv$subset_cells)) Cells(rv$subset_cells) else Cells(seu_full)
 
-      n <- length(input$signature_select)
+  seu <- subset(x = seu_full, cells = cells_subset)
 
-      # max 2 colonnes pour garder de gros plots
-      ncol <- min(2, n)
-      col_width <- 12 / ncol
+  for (red in Reductions(seu_full)) {
+    seu[[red]] <- subset(seu_full[[red]], cells = Cells(seu))
+  }
+  for (g in names(seu_full@graphs)) {
+    seu@graphs[[g]] <- seu_full@graphs[[g]][Cells(seu), Cells(seu)]
+  }
 
-      plot_list <- lapply(seq_len(n), function(i) {
-        plotname <- paste0("sig_plot_", i)
+  # Construire la liste finale des signatures selectionnees
+  all_sigs      <- c(CancerRNASig::signatures$geneset, custom_signatures())
+  selected_sigs <- all_sigs[all_selected]
+  genes_present <- rownames(seu)
+  selected_sigs <- lapply(selected_sigs, function(sig) intersect(sig, genes_present))
+  selected_sigs <- selected_sigs[sapply(selected_sigs, length) > 0]
 
-        column(
-          width = col_width,
-          plotOutput(plotname, height = "600px")
-        )
-      })
+  if (length(selected_sigs) == 0) {
+    showNotification("No genes from selected signatures found in Seurat object.", type = "error")
+    return()
+  }
 
-      rows <- split(plot_list, ceiling(seq_along(plot_list) / ncol))
+  append_log(paste("Running AddModuleScore for:", paste(names(selected_sigs), collapse = ", ")))
 
-      do.call(tagList, lapply(rows, fluidRow))
-    })
+  seu <- AddModuleScore(
+    object   = seu,
+    features = selected_sigs,
+    name     = "SigScore_"
+  )
 
+  # Stocker les noms des signatures selectionnees pour les plots
+  rv$selected_sig_names <- names(selected_sigs)
+  rv$signature_seu      <- seu
+})
 
-    observe({
+# ---- UI dynamique des plots ----
+output$signature_umap_plots <- renderUI({
 
-    req(rv$signature_seu)
-    req(input$signature_select)
+  req(rv$signature_seu)
+  req(rv$selected_sig_names)
 
-    for (i in seq_along(input$signature_select)) {
+  n         <- length(rv$selected_sig_names)
+  ncol      <- min(2, n)
+  col_width <- 12 / ncol
 
-      local({
-        ii <- i
-        plotname <- paste0("sig_plot_", ii)
+  plot_list <- lapply(seq_len(n), function(i) {
+    plotname <- paste0("sig_plot_", i)
+    column(
+      width = col_width,
+      plotOutput(plotname, height = "600px")
+    )
+  })
 
-        output[[plotname]] <- renderPlot({
+  rows <- split(plot_list, ceiling(seq_along(plot_list) / ncol))
+  do.call(tagList, lapply(rows, fluidRow))
+})
 
+# ---- Render chaque plot ----
+observe({
+
+  req(rv$signature_seu)
+  req(rv$selected_sig_names)
+
+  for (i in seq_along(rv$selected_sig_names)) {
+    local({
+      ii       <- i
+      plotname <- paste0("sig_plot_", ii)
+      sig_name <- rv$selected_sig_names[ii]
+
+      output[[plotname]] <- renderPlot({
         feature_name <- paste0("SigScore_", ii)
 
         p <- FeaturePlot(
           rv$signature_seu,
-          features = feature_name,
+          features  = feature_name,
           reduction = "umap",
-          pt.size=1.3, 
+          pt.size   = 1.3
         )
         p +
           scale_color_distiller(palette = "RdBu") +
-          ggtitle(input$signature_select[ii])
+          ggtitle(sig_name)
       })
-
-      })
-    }
-  })
+    })
+  }
+})
 
     # -----------------------
     # Annotate manual clusters
     # -----------------------
 
     output$annot_split_meta_ui <- renderUI({
-        req(rv$meta_choices)
-        selectInput(
-          "annot_split_meta",
-          "Group cells by:",
-          choices = rv$meta_choices,
-          selected = rv$meta_choices[1]
-        )
-      })
+      req(rv$meta_choices)
+      sorted_choices <- sort(grep("^(louvain_|kmeans_|leiden_)", names(rv$seu@meta.data), value = TRUE))
+      selectInput(
+        "annot_split_meta",
+        "Group cells by:",
+        choices = sorted_choices,
+        selected = sorted_choices[1]
+      )
+    })
 
       output$cluster_labels_ui <- renderUI({
         req(rv$seu)
@@ -1524,6 +1588,13 @@ observeEvent(input$input_zip, {
       unique_labels <- unique(labels)
       final_colors <- setNames(colors[match(unique_labels, labels)], unique_labels)
       annot_colors(list(clusters = clusters, labels = labels, colors = final_colors))
+
+      # Ajouter manual_annot au meta.data
+      cluster_to_label <- setNames(labels, clusters)
+      rv$seu@meta.data$manual_annot <- cluster_to_label[as.character(rv$seu@meta.data[[input$annot_split_meta]])]
+      rv$meta_choices <- colnames(rv$seu@meta.data)
+
+      append_log("Manual annotation added to meta.data as manual_annot.")
     })
 
     output$annot_umap <- renderPlot({
@@ -1622,29 +1693,28 @@ observeEvent(input$input_zip, {
       }
     ) 
 
-    ##-----------------------------
-    ## Pseudobulk
-    ## ----------------------------
+ ##-----------------------------
+## Pseudobulk
+## ----------------------------
 
-    observe({
-      req(rv$seu)
-      # split_meta : colonnes contenant "sample"
-      updateSelectInput(
-        session, "split_meta",
-        choices = colnames(rv$seu@meta.data)[grepl("sample", colnames(rv$seu@meta.data), ignore.case = TRUE)],
-        selected = "sample_id"
-      )
-      
-      # annot_meta : colonnes contenant "sctype" ou "published"
-      updateSelectInput(
-        session, "annot_meta",
-        choices = colnames(rv$seu@meta.data)[grepl("sctype|published", colnames(rv$seu@meta.data), ignore.case = TRUE)],
-        selected = "sctype_label"
-      )
-    })
+observe({
+  req(rv$seu)
+  updateSelectInput(
+    session, "split_meta",
+    choices = colnames(rv$seu@meta.data)[grepl("sample", colnames(rv$seu@meta.data), ignore.case = TRUE)],
+    selected = "sample_id"
+  )
+  updateSelectInput(
+    session, "annot_meta",
+    choices = colnames(rv$seu@meta.data)[grepl("^(louvain_|kmeans_|leiden_|sctype_|manual_|published)", colnames(rv$seu@meta.data), ignore.case = TRUE)],
+    selected = "sctype_label"
+  )
+})
 
-    rv$pseudobulk_data <- reactiveVal(NULL)
+rv$pseudobulk_matrix <- reactiveVal(NULL)
+rv$pseudobulk_data   <- reactiveVal(NULL)
 
+# ---- BOUTON : calcul lourd uniquement ----
 observeEvent(input$run_pseudobulk, {
 
   req(rv$seu)
@@ -1652,25 +1722,22 @@ observeEvent(input$run_pseudobulk, {
   req(input$annot_meta)
   req(input$k_monocle)
 
-  seu <- rv$seu
+  seu        <- rv$seu
   split_meta <- input$split_meta
-  annot_meta <- input$annot_meta
-  Kmonocle <- as.numeric(input$k_monocle)
+  Kmonocle   <- as.numeric(input$k_monocle)
 
   withProgress(message = "Running Pseudobulk Analysis...", value = 0, {
 
-    # Split Seurat object par sample
-    obj.list <- SplitObject(seu, split.by = split_meta)
+    obj.list   <- SplitObject(seu, split.by = split_meta)
     moclust_list <- list()
-    n_samples <- length(obj.list)
-    inc <- 0.9 / n_samples
+    n_samples  <- length(obj.list)
+    inc        <- 0.9 / n_samples
 
     for (i in seq_along(obj.list)) {
       incProgress(0.05, detail = paste("Processing sample:", names(obj.list)[i]))
 
-      # Expression matrix compatible Seurat v5
       seurat_v5 <- !("counts" %in% names(slotNames(obj.list[[i]]@assays$RNA)))
-      if(seurat_v5){
+      if (seurat_v5) {
         expr_mat <- GetAssayData(obj.list[[i]], assay = "RNA", layer = "counts")
       } else {
         expr_mat <- obj.list[[i]]@assays$RNA@counts
@@ -1680,160 +1747,162 @@ observeEvent(input$run_pseudobulk, {
       gene_annot <- data.frame(gene_short_name = rownames(expr_mat))
       rownames(gene_annot) <- rownames(expr_mat)
 
-      # Créer CellDataSet Monocle3
       cds <- new_cell_data_set(expr_mat, cell_metadata = cell_annot, gene_metadata = gene_annot)
       cds <- preprocess_cds(cds)
       cds <- reduce_dimension(cds)
       cds <- cluster_cells(cds, k = Kmonocle)
 
-      # Ajouter clusters Monocle à Seurat metadata
       cluster_name <- paste0("Monocle_k", Kmonocle)
       obj.list[[i]] <- AddMetaData(obj.list[[i]], metadata = clusters(cds), col.name = cluster_name)
 
-      sample_name <- names(obj.list)[i]
-      cluster_vec <- clusters(cds)  
-      barcodes <- colnames(obj.list[[i]])  # ce sont les vrais barcodes comme Monc_S01_1
+      sample_name          <- names(obj.list)[i]
+      cluster_vec          <- clusters(cds)
+      barcodes             <- colnames(obj.list[[i]])
       cluster_vec_prefixed <- paste0(sample_name, "_", cluster_vec)
       moclust_list[[sample_name]] <- setNames(cluster_vec_prefixed, barcodes)
       incProgress(inc)
     }
 
-    # Fusionner tous les clusters
     combined_clusters <- unlist(moclust_list)
     df_clusters <- data.frame(
       cluster = combined_clusters,
       barcode = names(combined_clusters),
       stringsAsFactors = FALSE
     )
-    # df_clusters$barcode contient Monc_S01.Monc_S01_1 etc.
-    df_clusters$barcode <- sub(".*\\.", "", df_clusters$barcode)
+    df_clusters$barcode    <- sub(".*\\.", "", df_clusters$barcode)
     df_clusters$split_meta <- sub("\\..*$", "", rownames(df_clusters))
 
     seu@meta.data$MonocleCluster <- df_clusters$cluster[match(rownames(seu@meta.data), df_clusters$barcode)]
 
-    if(all(is.na(seu$MonocleCluster))){
+    if (all(is.na(seu$MonocleCluster))) {
       showNotification("No cells assigned to clusters. Check your split_meta and K.", type = "error")
       return()
     }
 
-    # Pseudobulk
-    bulk <- AggregateExpression(seu, group.by = "MonocleCluster", return.seurat = TRUE)
-    mat <- GetAssayData(bulk, assay = "RNA", layer = "data")
-
-    # Top 1000 genes les plus variables
+    bulk    <- AggregateExpression(seu, group.by = "MonocleCluster", return.seurat = TRUE)
+    mat     <- GetAssayData(bulk, assay = "RNA", layer = "data")
     top1000 <- names(sort(apply(mat, 1, sd, na.rm = TRUE), decreasing = TRUE))[1:1000]
-    centered_mat <- scale(mat[top1000,], scale = FALSE)
-    mat_corr <- cor(centered_mat, use = "pairwise.complete.obs")
+    centered_mat <- scale(mat[top1000, ], scale = FALSE)
+    mat_corr     <- cor(centered_mat, use = "pairwise.complete.obs")
 
     df_clusters$barcode <- gsub("_", "-", df_clusters$barcode)
 
-    # Top annotation (metadata choisi)
-    top_annot_df <- data.frame(
-      annot = df_clusters$split_meta[match(colnames(mat_corr), df_clusters$barcode)],
-      stringsAsFactors = FALSE
-    )
-    top_vals <- unique(top_annot_df$annot)
-    top_vals <- top_vals[!is.na(top_vals)]
-    top_col <- setNames(viridis(length(top_vals), option = "C"), top_vals)
-    top_annot <- HeatmapAnnotation(
-      top_meta = top_annot_df$annot,
-      col = list(top_meta = top_col),
-      simple_anno_size = unit(1.2, "cm")
-    )
-
-     # Bottom annotation : histogramme des proportions
-    prop_tab <- prop.table(table(seu@meta.data[[annot_meta]], seu@meta.data$MonocleCluster), 2)
-    cell_types <- rownames(prop_tab)
-    n <- length(cell_types)
-    cols <- qualitative_hcl(n, palette = "Dark3") 
-    bottom_col <- setNames(cols, cell_types)
-    bottom_annot <- HeatmapAnnotation(
-      bar = anno_barplot(t(prop_tab), gp = gpar(fill = bottom_col), height = unit(6, "cm")),
-      simple_anno_size = unit(1, "cm")
-    )
-
-    # Stocker les données réactives
-    rv$pseudobulk_data(list(
-      mat_corr = mat_corr,
-      top_annot = top_annot,
-      bottom_annot = bottom_annot,
-      bottom_col = bottom_col
+    # Stocker uniquement les données brutes
+    rv$pseudobulk_matrix(list(
+      mat_corr    = mat_corr,
+      seu         = seu,
+      df_clusters = df_clusters
     ))
 
     incProgress(1)
+    append_log("Pseudobulk matrix computed.")
   })
 })
 
+# ---- OBSERVER : reconstruit les annotations quand matrix ou annot_meta change ----
+observeEvent(list(rv$pseudobulk_matrix(), input$annot_meta), {
+  req(rv$pseudobulk_matrix())
 
-    # Render Plot réactif
-    output$pseudobulk_heatmap <- renderPlot({
-      data <- rv$pseudobulk_data()
-      req(data)
+  data        <- rv$pseudobulk_matrix()
+  mat_corr    <- data$mat_corr
+  seu         <- data$seu
+  df_clusters <- data$df_clusters
 
-    # Heatmap + annotation
+  # Top annotation
+  top_annot_df <- data.frame(
+    annot = df_clusters$split_meta[match(colnames(mat_corr), df_clusters$barcode)],
+    stringsAsFactors = FALSE
+  )
+  top_vals <- unique(top_annot_df$annot)
+  top_vals <- top_vals[!is.na(top_vals)]
+  top_col  <- setNames(viridis(length(top_vals), option = "C"), top_vals)
+  top_annot <- HeatmapAnnotation(
+    top_meta = top_annot_df$annot,
+    col      = list(top_meta = top_col),
+    simple_anno_size = unit(1.2, "cm")
+  )
+
+  # Bottom annotation
+  req(input$annot_meta %in% colnames(seu@meta.data))
+  prop_tab   <- prop.table(table(seu@meta.data[[input$annot_meta]], seu@meta.data$MonocleCluster), 2)
+  cell_types <- rownames(prop_tab)
+  n          <- length(cell_types)
+  cols       <- qualitative_hcl(n, palette = "Dark3")
+  bottom_col <- setNames(cols, cell_types)
+  bottom_annot <- HeatmapAnnotation(
+    bar = anno_barplot(t(prop_tab), gp = gpar(fill = bottom_col), height = unit(6, "cm")),
+    simple_anno_size = unit(1, "cm")
+  )
+
+  rv$pseudobulk_data(list(
+    mat_corr     = mat_corr,
+    top_annot    = top_annot,
+    bottom_annot = bottom_annot,
+    bottom_col   = bottom_col
+  ))
+})
+
+# ---- RENDER PLOT ----
+output$pseudobulk_heatmap <- renderPlot({
+  req(rv$pseudobulk_data())
+  data <- rv$pseudobulk_data()
+
+  ht <- Heatmap(
+    data$mat_corr,
+    col = colorRamp2(c(0.3, 0.6, 1), c("blue", "white", "red")),
+    top_annotation    = data$top_annot,
+    bottom_annotation = data$bottom_annot,
+    clustering_distance_rows    = "pearson",
+    clustering_distance_columns = "pearson",
+    clustering_method_rows      = "ward.D2",
+    clustering_method_columns   = "ward.D2",
+    show_row_names    = TRUE,
+    show_column_names = TRUE,
+    name = "Corr"
+  )
+
+  barplot_legend <- Legend(
+    labels    = names(data$bottom_col),
+    title     = "Cell types",
+    legend_gp = gpar(fill = data$bottom_col)
+  )
+
+  draw(ht, annotation_legend_list = list(barplot_legend))
+})
+
+# ---- DOWNLOAD PDF ----
+output$download_pseudobulk_pdf <- downloadHandler(
+  filename = function() {
+    paste0("pseudobulk_heatmap_", Sys.Date(), ".pdf")
+  },
+  content = function(file) {
+    req(rv$pseudobulk_data())
+    data <- rv$pseudobulk_data()
+
+    pdf(file, width = 12, height = 15)
+
     ht <- Heatmap(
       data$mat_corr,
       col = colorRamp2(c(0.3, 0.6, 1), c("blue", "white", "red")),
-      top_annotation = data$top_annot,
+      top_annotation    = data$top_annot,
       bottom_annotation = data$bottom_annot,
-      clustering_distance_rows = "pearson",
+      clustering_distance_rows    = "pearson",
       clustering_distance_columns = "pearson",
-      clustering_method_rows = "ward.D2",
-      clustering_method_columns = "ward.D2",
-      show_row_names = TRUE,
+      clustering_method_rows      = "ward.D2",
+      clustering_method_columns   = "ward.D2",
+      show_row_names    = TRUE,
       show_column_names = TRUE,
       name = "Corr"
     )
 
-    # Légende du barplot
     barplot_legend <- Legend(
-      labels = names(data$bottom_col),
-      title = "Cell types",
+      labels    = names(data$bottom_col),
+      title     = "Cell types",
       legend_gp = gpar(fill = data$bottom_col)
     )
 
     draw(ht, annotation_legend_list = list(barplot_legend))
-    })
-
-    output$download_pseudobulk_pdf <- downloadHandler(
-      filename = function() {
-        paste0("pseudobulk_heatmap_", Sys.Date(), ".pdf")
-      },
-      content = function(file) {
-        data <- rv$pseudobulk_data()
-        req(data)
-
-        # Ouvrir le PDF
-        pdf(file, width = 12, height = 15)  # ajuste la taille si besoin
-
-        # Créer la heatmap
-        ht <- Heatmap(
-          data$mat_corr,
-          col = colorRamp2(c(0.3, 0.6, 1), c("blue", "white", "red")),
-          top_annotation = data$top_annot,
-          bottom_annotation = data$bottom_annot,
-          clustering_distance_rows = "pearson",
-          clustering_distance_columns = "pearson",
-          clustering_method_rows = "ward.D2",
-          clustering_method_columns = "ward.D2",
-          show_row_names = TRUE,
-          show_column_names = TRUE,
-          name = "Corr"
-        )
-
-        # Légende barplot si nécessaire
-        if (!is.null(data$bottom_col)) {
-          barplot_legend <- Legend(
-            labels = names(data$bottom_col),
-            title = "Cell types",
-            legend_gp = gpar(fill = data$bottom_col)
-          )
-          draw(ht, annotation_legend_list = list(barplot_legend))
-        } else {
-          draw(ht)
-        }
-
-        dev.off()
-      }
-    )
+    dev.off()
+  }
+)
 }
