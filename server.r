@@ -334,7 +334,9 @@ observeEvent(input$input_zip, {
   req(input$input_zip)
   append_log("Starting Seurat object creation...")
 
-  tmpdir <- tempdir()
+  # Dossier temporaire unique
+  tmpdir <- file.path(tempdir(), paste0("upload_", as.integer(Sys.time())))
+  dir.create(tmpdir, showWarnings = FALSE)
 
   tryCatch({
     append_log("Unzipping input...")
@@ -744,7 +746,8 @@ observeEvent(input$input_zip, {
       selectInput(
         "violin_gene_family", 
         "Gene family (optional)", 
-        choices = c("None" = "", names(gene_families())),
+        choices = names(gene_families()),
+        multiple = TRUE,
         selected = ""
       )
     })
@@ -757,14 +760,18 @@ observeEvent(input$input_zip, {
     # Split meta UI
     output$split_meta_ui <- renderUI({
       req(rv$meta_choices)
-      selectInput("split_meta", "Split by (metadata)", choices = rv$meta_choices, selected = rv$meta_choices[1])
+      sorted_choices <- sort(rv$meta_choices)
+      selectInput("split_meta", "Split by (metadata)", choices = sorted_choices, selected = sorted_choices[1])
     })
 
     observeEvent(input$plot_violin, {
       req(rv$seu)
 
       genes_manual <- input$violin_gene
-      genes_family <- if(input$violin_gene_family != "") gene_families()[[input$violin_gene_family]] else character(0)
+      genes_family <- character(0)
+      if (!is.null(input$violin_gene_family) && length(input$violin_gene_family) > 0 && !("" %in% input$violin_gene_family)) {
+        genes_family <- unlist(gene_families()[input$violin_gene_family])
+      }
       genes_to_plot <- unique(c(genes_manual, genes_family))
       genes_exist <- genes_to_plot[genes_to_plot %in% rownames(rv$seu)]
       
@@ -811,61 +818,63 @@ observeEvent(input$input_zip, {
         "dot_gene_family", 
         "Gene family (optional)", 
         choices = c("None" = "", names(gene_families())),
+        multiple = TRUE,
         selected = ""
       )
     })
     
     output$dot_split_meta_ui <- renderUI({
-        req(rv$meta_choices)
-
-        selectInput(
-          "dot_split_meta",
-          "Group DotPlot by:",
-          choices = rv$meta_choices,
-          selected = "seurat_clusters"  # valeur par défaut
-        )
-      })
+    req(rv$meta_choices)
+    sorted_choices <- sort(rv$meta_choices)
+    
+    selectInput(
+      "dot_split_meta",
+      "Group DotPlot by:",
+      choices = sorted_choices,
+      selected = sorted_choices[1]
+    )
+  })
 
 
     observeEvent(input$plot_dot, {
-        req(rv$seu)
+      req(rv$seu)
 
-        genes_manual <- input$dot_genes
-        genes_family <- if(input$dot_gene_family != "")
-          gene_families()[[input$dot_gene_family]]
-        else character(0)
+      genes_manual <- input$dot_genes
+      
+      # Gestion multiple sélections de familles
+      selected_families <- input$dot_gene_family[input$dot_gene_family != ""]
+      genes_family <- if (length(selected_families) > 0)
+        unlist(lapply(selected_families, function(f) gene_families()[[f]]))
+      else character(0)
 
-        genes_to_plot <- unique(c(genes_manual, genes_family))
-        genes_exist <- genes_to_plot[genes_to_plot %in% rownames(rv$seu)]
+      genes_to_plot <- unique(c(genes_manual, genes_family))
+      genes_exist <- genes_to_plot[genes_to_plot %in% rownames(rv$seu)]
 
-        if (length(genes_exist) == 0) {
-          showNotification(
-            "None of the selected genes are found in the Seurat object",
-            type="error"
-          )
-          return()
+      if (length(genes_exist) == 0) {
+        showNotification(
+          "None of the selected genes are found in the Seurat object",
+          type = "error"
+        )
+        return()
+      }
+
+      output$dotPlot <- renderPlot({
+        group_var <- if (
+          !is.null(input$dot_split_meta) &&
+          input$dot_split_meta %in% colnames(rv$seu@meta.data)
+        ) {
+          input$dot_split_meta
+        } else {
+          "seurat_clusters"
         }
 
-        output$dotPlot <- renderPlot({
-          group_var <- if (
-            !is.null(input$dot_split_meta) &&
-            input$dot_split_meta %in% colnames(rv$seu@meta.data)
-          ) {
-            input$dot_split_meta
-          } else {
-            "seurat_clusters"
-          }
-
-          DotPlot(rv$seu,
-            features = genes_exist, 
-            group.by = group_var,
-            cols = c("blue", "red")
-          ) + coord_flip()
-
-        })
-
+        DotPlot(rv$seu,
+          features = genes_exist,
+          group.by = group_var,
+          cols = c("blue", "red")
+        ) + coord_flip()
       })
-
+    })
 
 
     # -------------------------
@@ -875,12 +884,13 @@ observeEvent(input$input_zip, {
     # UI dynamique pour choisir metadata
     output$marker_split_meta_ui <- renderUI({
       req(rv$meta_choices)
-
+      sorted_choices <- sort(rv$meta_choices)
+      
       selectInput(
         "marker_split_meta",
         "Group cells by:",
-        choices = rv$meta_choices,
-        selected = "seurat_clusters"
+        choices = sorted_choices,
+        selected = sorted_choices[1]
       )
     })
 
@@ -981,6 +991,7 @@ observeEvent(input$input_zip, {
 
       # ajouter colonne gene
       res$gene <- rownames(res)
+      rv$marker_res <- res 
 
       # protection si aucun marker
       if (nrow(res) == 0) {
@@ -1071,9 +1082,6 @@ observeEvent(input$input_zip, {
         )
       })
 
-
-
-
     }) 
 
     output$marker_table_title <- renderUI({
@@ -1088,6 +1096,46 @@ observeEvent(input$input_zip, {
     </ul>
     ")
   })
+
+  # -------------------------
+  # Download TSV : top markers par cluster en colonnes
+  # -------------------------
+  output$download_top_markers_tsv <- downloadHandler(
+    filename = function() {
+      paste0("top_markers_all_clusters_", Sys.Date(), ".tsv")
+    },
+    content = function(file) {
+      req(rv$seu)
+      seu <- rv$seu
+      Idents(seu) <- seu[[input$marker_split_meta]][,1]
+      
+      all_clusters <- sort(unique(Idents(seu)))
+      
+      withProgress(message = "Computing markers for all clusters...", {
+        df_export <- lapply(all_clusters, function(cl) {
+          res_cl <- FindMarkers(
+            seu,
+            ident.1 = cl,
+            logfc.threshold = 0.25,
+            only.pos = TRUE
+          )
+          res_cl$gene <- rownames(res_cl)
+          
+          genes <- res_cl |>
+            dplyr::filter(p_val_adj < 0.05) |>
+            dplyr::slice_max(avg_log2FC, n = input$top_n) |>
+            dplyr::pull(gene)
+          
+          c(genes, rep(NA, input$top_n - length(genes)))
+        })
+      })
+      
+      df_export <- as.data.frame(df_export)
+      colnames(df_export) <- as.character(all_clusters)
+      
+      write.table(df_export, file, sep = "\t", row.names = FALSE, quote = FALSE, na = "NA")
+    }
+  )
 
   ##--------------------------
   # ScType Annotation Server

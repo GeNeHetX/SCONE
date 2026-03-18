@@ -282,7 +282,7 @@ fluidRow(
               fluidRow(
                 column(12,
                        actionButton("apply_subset", "Apply Subset", icon = icon("filter"),
-                                    style = paste0("background:", btn_bg, "; color:", btn_text, ";")),
+                                    style = "background:#4CAF50; color:white;"),
                       uiOutput("subset_message"),
                       verbatimTextOutput("subset_summary") %>% withSpinner()))))),
 
@@ -309,9 +309,9 @@ fluidRow(
                           options = list(placeholder='Type gene name...', maxOptions=1000)
             ),
             uiOutput("violin_gene_family_ui"),   # <- ici le select des familles
-            checkboxInput("split_by", "Split by metadata", FALSE),
+            checkboxInput("split_by", "Split by metadata", TRUE),
             uiOutput("split_meta_ui"),
-            actionButton("plot_violin", "Plot Violin", icon = icon("chart-area")),
+            actionButton("plot_violin", "Plot Violin", icon = icon("chart-area"), style = "background:#4CAF50; color:white;"),
             plotOutput("umapViolinPlot", height = "600px") %>% withSpinner()
           ),
           box(width = 8, status = "info", solidHeader = TRUE, title = "Violin plot",
@@ -338,7 +338,7 @@ fluidRow(
               # Famille de gènes
               uiOutput("dot_gene_family_ui"),
               uiOutput("dot_split_meta_ui"),
-              actionButton("plot_dot", "Plot DotPlot", icon = icon("dot-circle")),
+              actionButton("plot_dot", "Plot DotPlot", icon = icon("dot-circle"), style = "background:#4CAF50; color:white;"),
               plotOutput("umapDotPlot", height = "600px") %>% withSpinner()
           ),
           box(width = 8, status = "info", solidHeader = TRUE, title = "DotPlot",
@@ -358,9 +358,9 @@ fluidRow(
               ),
               uiOutput("cluster_select_ui"),
               numericInput("top_n", "Top markers per cluster",
-                          value = 10, min = 5, max = 100),
+                          value = 20, min = 5, max = 100),
               actionButton("run_markers", "Run Marker Analysis", icon = icon("dna"),
-                style = "background:#EC407A;color:white;"
+                style = "background:#4CAF50; color:white;"
               ),
               plotOutput("umapMarkerPlot", height = "600px") %>% withSpinner()
           ),
@@ -370,6 +370,10 @@ fluidRow(
               dataTableOutput("top_marker_table"),
               hr(),
               uiOutput("marker_table_title"),
+              downloadButton("download_top_markers_tsv", "Download Top Markers for ALL Clusters",
+                icon = icon("download")
+              ),
+              hr(),
               h4("Full results"),
               dataTableOutput("marker_table")
           )
@@ -398,7 +402,7 @@ tabPanel("Annotation (ScType)",
           "run_sctype_annotation",
           "Run ScType Annotation",
           icon = icon("database"),
-          style = "background:#26A69A;color:white;"
+          style = "background:#4CAF50; color:white;"
         ),
         
         br(), br(),
