@@ -1425,124 +1425,190 @@ observeEvent(input$input_zip, {
         theme_void()
     })
 
-# ----------------------------------
-# proj signature with AddModuleScore
-# ----------------------------------
+    # ----------------------------------
+    # proj signature with AddModuleScore
+    # ----------------------------------
 
-# ---- Signatures custom ----
-custom_signatures <- reactiveVal(list())
+    # ---- Signatures custom ----
+    custom_signatures <- reactiveVal(list())
 
-observeEvent(input$custom_sig_file, {
-  req(input$custom_sig_file)
-  df <- openxlsx::read.xlsx(input$custom_sig_file$datapath)
-  sig_list <- lapply(df, function(col) col[!is.na(col) & col != ""])
-  custom_signatures(sig_list)
-  updateSelectizeInput(session, "custom_sig_select", choices = names(sig_list))
-  append_log(paste("Custom signatures loaded:", paste(names(sig_list), collapse = ", ")))
-})
-
-# ---- Run AddModuleScore ----
-observeEvent(input$run_signature_projection, {
-
-  req(rv$seu)
-
-  # Fusionner les deux selections
-  selected_builtin <- input$signature_select
-  selected_custom  <- input$custom_sig_select
-  all_selected     <- c(selected_builtin, selected_custom)
-
-  if (length(all_selected) == 0) {
-    showNotification("Please select at least one signature.", type = "error")
-    return()
-  }
-
-  seu_full     <- rv$seu
-  cells_subset <- if (!is.null(rv$subset_cells)) Cells(rv$subset_cells) else Cells(seu_full)
-
-  seu <- subset(x = seu_full, cells = cells_subset)
-
-  for (red in Reductions(seu_full)) {
-    seu[[red]] <- subset(seu_full[[red]], cells = Cells(seu))
-  }
-  for (g in names(seu_full@graphs)) {
-    seu@graphs[[g]] <- seu_full@graphs[[g]][Cells(seu), Cells(seu)]
-  }
-
-  # Construire la liste finale des signatures selectionnees
-  all_sigs      <- c(CancerRNASig::signatures$geneset, custom_signatures())
-  selected_sigs <- all_sigs[all_selected]
-  genes_present <- rownames(seu)
-  selected_sigs <- lapply(selected_sigs, function(sig) intersect(sig, genes_present))
-  selected_sigs <- selected_sigs[sapply(selected_sigs, length) > 0]
-
-  if (length(selected_sigs) == 0) {
-    showNotification("No genes from selected signatures found in Seurat object.", type = "error")
-    return()
-  }
-
-  append_log(paste("Running AddModuleScore for:", paste(names(selected_sigs), collapse = ", ")))
-
-  seu <- AddModuleScore(
-    object   = seu,
-    features = selected_sigs,
-    name     = "SigScore_"
-  )
-
-  # Stocker les noms des signatures selectionnees pour les plots
-  rv$selected_sig_names <- names(selected_sigs)
-  rv$signature_seu      <- seu
-})
-
-# ---- UI dynamique des plots ----
-output$signature_umap_plots <- renderUI({
-
-  req(rv$signature_seu)
-  req(rv$selected_sig_names)
-
-  n         <- length(rv$selected_sig_names)
-  ncol      <- min(2, n)
-  col_width <- 12 / ncol
-
-  plot_list <- lapply(seq_len(n), function(i) {
-    plotname <- paste0("sig_plot_", i)
-    column(
-      width = col_width,
-      plotOutput(plotname, height = "600px")
-    )
-  })
-
-  rows <- split(plot_list, ceiling(seq_along(plot_list) / ncol))
-  do.call(tagList, lapply(rows, fluidRow))
-})
-
-# ---- Render chaque plot ----
-observe({
-
-  req(rv$signature_seu)
-  req(rv$selected_sig_names)
-
-  for (i in seq_along(rv$selected_sig_names)) {
-    local({
-      ii       <- i
-      plotname <- paste0("sig_plot_", ii)
-      sig_name <- rv$selected_sig_names[ii]
-
-      output[[plotname]] <- renderPlot({
-        feature_name <- paste0("SigScore_", ii)
-
-        p <- FeaturePlot(
-          rv$signature_seu,
-          features  = feature_name,
-          reduction = "umap",
-          pt.size   = 1.3
-        )
-        p +
-          scale_color_distiller(palette = "RdBu") +
-          ggtitle(sig_name)
-      })
+    observeEvent(input$custom_sig_file, {
+      req(input$custom_sig_file)
+      df <- openxlsx::read.xlsx(input$custom_sig_file$datapath)
+      sig_list <- lapply(df, function(col) col[!is.na(col) & col != ""])
+      custom_signatures(sig_list)
+      updateSelectizeInput(session, "custom_sig_select", choices = names(sig_list))
+      append_log(paste("Custom signatures loaded:", paste(names(sig_list), collapse = ", ")))
     })
-  }
-})
+
+    # ---- Run AddModuleScore ----
+    observeEvent(input$run_signature_projection, {
+
+      req(rv$seu)
+
+      # Fusionner les deux selections
+      selected_builtin <- input$signature_select
+      selected_custom  <- input$custom_sig_select
+      all_selected     <- c(selected_builtin, selected_custom)
+
+      if (length(all_selected) == 0) {
+        showNotification("Please select at least one signature.", type = "error")
+        return()
+      }
+
+      seu_full     <- rv$seu
+      cells_subset <- if (!is.null(rv$subset_cells)) Cells(rv$subset_cells) else Cells(seu_full)
+
+      seu <- subset(x = seu_full, cells = cells_subset)
+
+      for (red in Reductions(seu_full)) {
+        seu[[red]] <- subset(seu_full[[red]], cells = Cells(seu))
+      }
+      for (g in names(seu_full@graphs)) {
+        seu@graphs[[g]] <- seu_full@graphs[[g]][Cells(seu), Cells(seu)]
+      }
+
+      # Construire la liste finale des signatures selectionnees
+      all_sigs      <- c(CancerRNASig::signatures$geneset, custom_signatures())
+      selected_sigs <- all_sigs[all_selected]
+      genes_present <- rownames(seu)
+      selected_sigs <- lapply(selected_sigs, function(sig) intersect(sig, genes_present))
+      selected_sigs <- selected_sigs[sapply(selected_sigs, length) > 0]
+
+      if (length(selected_sigs) == 0) {
+        showNotification("No genes from selected signatures found in Seurat object.", type = "error")
+        return()
+      }
+
+      append_log(paste("Running AddModuleScore for:", paste(names(selected_sigs), collapse = ", ")))
+
+      seu <- AddModuleScore(
+        object   = seu,
+        features = selected_sigs,
+        name     = "SigScore_"
+      )
+
+      # Stocker les noms des signatures selectionnees pour les plots
+      rv$selected_sig_names <- names(selected_sigs)
+      rv$signature_seu      <- seu
+    })
+
+    # ---- UI dynamique des plots ----
+    output$signature_umap_plots <- renderUI({
+
+      req(rv$signature_seu)
+      req(rv$selected_sig_names)
+
+      n         <- length(rv$selected_sig_names)
+      ncol      <- min(2, n)
+      col_width <- 12 / ncol
+
+      plot_list <- lapply(seq_len(n), function(i) {
+        plotname <- paste0("sig_plot_", i)
+        column(
+          width = col_width,
+          plotOutput(plotname, height = "600px")
+        )
+      })
+
+      rows <- split(plot_list, ceiling(seq_along(plot_list) / ncol))
+      do.call(tagList, lapply(rows, fluidRow))
+    })
+
+    # ---- Render chaque plot ----
+    observe({
+
+      req(rv$signature_seu)
+      req(rv$selected_sig_names)
+
+      for (i in seq_along(rv$selected_sig_names)) {
+        local({
+          ii       <- i
+          plotname <- paste0("sig_plot_", ii)
+          sig_name <- rv$selected_sig_names[ii]
+
+          output[[plotname]] <- renderPlot({
+            feature_name <- paste0("SigScore_", ii)
+
+            p <- FeaturePlot(
+              rv$signature_seu,
+              features  = feature_name,
+              reduction = "umap",
+              pt.size   = 1.3
+            )
+            p +
+              scale_color_distiller(palette = "RdBu") +
+              ggtitle(sig_name)
+          })
+        })
+      }
+    })
+
+    # ---- Select metadata pour le dotplot signatures ----
+    output$dot_split_meta_sig_ui <- renderUI({
+      req(rv$signature_seu)
+      sorted_choices <- sort(grep("^(louvain_|kmeans_|leiden_|sampleID)",colnames(rv$signature_seu@meta.data), value = TRUE))
+      selectInput(
+        "dot_split_meta_sig",
+        "Group DotPlot by:",
+        choices  = sorted_choices,
+        selected = sorted_choices[1]
+      )
+    })
+
+    # ---- DotPlot des scores de signatures par cluster ----
+    output$signature_dotplot <- renderPlot({
+      req(rv$signature_seu)
+      req(rv$selected_sig_names)
+      req(input$dot_split_meta_sig)
+
+      seu      <- rv$signature_seu
+      n_sigs   <- length(rv$selected_sig_names)
+
+      # Les colonnes SigScore_ dans le meta.data
+      score_cols <- paste0("SigScore_", seq_len(n_sigs))
+      score_cols <- score_cols[score_cols %in% colnames(seu@meta.data)]
+
+      if (length(score_cols) == 0) {
+        showNotification("No signature scores found in metadata.", type = "error")
+        return()
+      }
+
+      # Construire un dataframe long : cluster x signature x score moyen
+      meta <- seu@meta.data
+      meta$cluster <- meta[[input$dot_split_meta_sig]]
+
+      df_long <- do.call(rbind, lapply(seq_along(score_cols), function(i) {
+        col <- score_cols[i]
+        data.frame(
+          cluster   = meta$cluster,
+          signature = rv$selected_sig_names[i],
+          score     = meta[[col]],
+          stringsAsFactors = FALSE
+        )
+      }))
+
+      # Calculer moyenne et pct expressing (score > 0) par cluster x signature
+      df_summary <- df_long %>%
+        dplyr::group_by(cluster, signature) %>%
+        dplyr::summarise(
+          avg_score = mean(score, na.rm = TRUE),
+          pct_exp   = mean(score > 0, na.rm = TRUE) * 100,
+          .groups   = "drop"
+        )
+
+      ggplot(df_summary, aes(x = cluster, y = signature)) +
+        geom_point(aes(size = pct_exp, color = avg_score)) +
+        scale_color_distiller(palette = "RdBu", name = "Avg score") +
+        scale_size_continuous(range = c(1, 10), name = "% cells > 0") +
+        theme_classic() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.text.y = element_text(size = 14),
+          axis.title  = element_blank()
+        )+
+        labs(title = "Signature scores per cluster")
+    })
 
     # -----------------------
     # Annotate manual clusters

@@ -470,6 +470,14 @@ tabPanel("Annotation (ScType)",
                 title = "UMAP signature projection",
                 uiOutput("signature_umap_plots")
               )
+            ),
+            fluidRow(
+              box(
+                width = 12,
+                title = "DotPlot signature per cluster",
+                uiOutput("dot_split_meta_sig_ui"),
+                plotOutput("signature_dotplot", height = "600px") %>% withSpinner()
+              )
             )
           ),
 
