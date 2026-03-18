@@ -272,39 +272,19 @@ fluidRow(
               plotOutput("qc_scatter3", height = "500px") %>% withSpinner()
           ),
           box(width = 6, status = "info", solidHeader = TRUE,
-              title = "UMI vs Gene median gradient",
-              plotOutput("qc_scatter4", height = "500px") %>% withSpinner()
-          )
-        ),
-        fluidRow(
-          box(width = 12, status = "info", solidHeader = TRUE,
               title = "Subset Cells Based on QC",
-              fluidRow(
-                column(4, numericInput("nFeature_min", "Min nFeature_RNA", value = 200)),
-                column(4, numericInput("nFeature_max", "Max nFeature_RNA", value = 5000)),
-                column(4, numericInput("percent_mt_max", "Max percent.mt", value = 10))
+               fluidRow(
+                column(12, numericInput("nFeature_min", "Min nFeature_RNA", value = 200)),
+                column(12, numericInput("nFeature_max", "Max nFeature_RNA", value = 5000)),
+                column(12, numericInput("high_cutoff_UMI", "Max UMI", value = 45000)),
+                column(12, numericInput("percent_mt_max", "Max percent.mt", value = 20))
               ),
               fluidRow(
                 column(12,
                        actionButton("apply_subset", "Apply Subset", icon = icon("filter"),
                                     style = paste0("background:", btn_bg, "; color:", btn_text, ";")),
                       uiOutput("subset_message"),
-                      verbatimTextOutput("subset_summary") %>% withSpinner()
-                )
-              )
-          )
-        )
-      ),
-
-      # # UMAP
-      # tabPanel("UMAP",
-      #   fluidRow(
-      #     box(width = 12, status = "info", solidHeader = TRUE,
-      #         title = "UMAP plot",
-      #         plotOutput("umapPlot", height = "1200px") %>% withSpinner()
-      #     )
-      #   )
-      # ),
+                      verbatimTextOutput("subset_summary") %>% withSpinner()))))),
 
       # UMAP Metadata
       tabPanel("UMAP",

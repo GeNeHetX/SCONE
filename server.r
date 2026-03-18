@@ -395,7 +395,8 @@ observeEvent(input$input_zip, {
     seu[["percent.mt"]] <- PercentageFeatureSet(seu, features = mito_genes)
 
     if(length(mito_genes) > 0){
-      seu$percent_mito <- Matrix::colSums(seu[mito_genes, ]) / Matrix::colSums(seu) * 100
+      mat_seu = seu@assays$RNA$counts
+      seu$percent_mito <- Matrix::colSums(mat_seu[mito_genes, ]) / Matrix::colSums(mat_seu) * 100
     } else {
       seu$percent_mito <- 0
     }
@@ -458,24 +459,24 @@ observeEvent(input$input_zip, {
     })
 
     output$qc_scatter1 <- renderPlot({
-      QC_Plot_UMIvsGene(seurat_object = rv$seu, low_cutoff_gene = 600, high_cutoff_gene = 5500,
-                        low_cutoff_UMI = 500, high_cutoff_UMI = 50000)
+      QC_Plot_UMIvsGene(seurat_object = rv$seu, low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max,
+                        low_cutoff_UMI = 500, high_cutoff_UMI = input$high_cutoff_UMI)
     })
 
     output$qc_scatter2 <- renderPlot({
       QC_Plot_GenevsFeature(seurat_object = rv$seu, feature1 = "percent_mito",
-                            low_cutoff_gene = 600, high_cutoff_gene = 5500, high_cutoff_feature = 20)
+                            low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max, high_cutoff_feature = input$percent_mt_max)
     })
 
     output$qc_scatter3 <- renderPlot({
       QC_Plot_UMIvsGene(seurat_object = rv$seu, meta_gradient_name = "percent_mito",
-                        low_cutoff_gene = 600, high_cutoff_gene = 5500, high_cutoff_UMI = 45000)
+                        low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max, high_cutoff_UMI = input$high_cutoff_UMI,
+                        meta_gradient_low_cutoff = input$percent_mt_max)
     })
 
     output$qc_scatter4 <- renderPlot({
       QC_Plot_UMIvsGene(seurat_object = rv$seu, meta_gradient_name = "percent_mito",
-                        low_cutoff_gene = 600, high_cutoff_gene = 5500, high_cutoff_UMI = 45000,
-                        meta_gradient_low_cutoff = 20)
+                        low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max, high_cutoff_UMI = input$high_cutoff_UMI)
     })
 
     # -------------------------
@@ -511,7 +512,7 @@ observeEvent(input$input_zip, {
         tagList(
           numericInput("nFeature_min", "Min nFeature_RNA", value = 200),
           numericInput("nFeature_max", "Max nFeature_RNA", value = 5000),
-          numericInput("percent_mt_max", "Max percent.mt", value = 10)
+          numericInput("high_cutoff_UMI", "Max UMI", value = 45000)
         )
       })
 
@@ -528,8 +529,8 @@ observeEvent(input$input_zip, {
           # Appliquer le subset
           cells_keep <- WhichCells(rv$seu_original, expression = 
                                     nFeature_RNA >= input$nFeature_min &
-                                    nFeature_RNA <= input$nFeature_max &
-                                    percent.mt <= input$percent_mt_max)
+                                    nFeature_RNA <= input$nFeature_max )#&
+                                    # percent.mt <= input$percent_mt_max)
           
           rv$subset_cells <- subset(rv$seu_original, cells = cells_keep)
           rv$seu <- rv$subset_cells
@@ -578,11 +579,12 @@ observeEvent(input$input_zip, {
       seu <- rv$seu
 
       # Apply subset if thresholds defined
-      if (!is.null(input$nFeature_min) && !is.null(input$nFeature_max) && !is.null(input$percent_mt_max)) {
+      if (!is.null(input$nFeature_min) && !is.null(input$nFeature_max) && !is.null(input$percent_mt_max)) { #!is.null(input$percent_mt_max)
         cells_keep <- WhichCells(seu, expression = 
                                    nFeature_RNA >= input$nFeature_min &
-                                   nFeature_RNA <= input$nFeature_max &
-                                   percent.mt <= input$percent_mt_max)
+                                   nFeature_RNA <= input$nFeature_max #&
+        )
+                                  #  percent.mt <= input$percent_mt_max)
         seu <- subset(seu, cells = cells_keep)
         append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
       } else {
