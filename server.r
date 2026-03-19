@@ -32,7 +32,8 @@ if(length(bioc_new)) {
 github_packages <- c(
   "GeNeHetX/CancerRNASig",
   "bnprks/BPCells/r",
-  "cole-trapnell-lab/monocle3"
+  "cole-trapnell-lab/monocle3",
+  "immunogenomics/presto"
 )
 
 if(length(github_packages)) {
@@ -42,14 +43,6 @@ if(length(github_packages)) {
   for(repo in github_packages) {
     remotes::install_github(repo, dependencies = TRUE, upgrade = "never")
   }
-}
-
-if (!requireNamespace("devtools", quietly = TRUE)) {
-  install.packages("devtools")
-}
-
-if (!requireNamespace("presto", quietly = TRUE)) {
-  devtools::install_github("immunogenomics/presto")
 }
 
 ## LOAD LIBRARIES
