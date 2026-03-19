@@ -6,7 +6,7 @@ cran_packages <- c(
   "shiny", "shinydashboard", "shinycssloaders", "magrittr", "shinyjs",
   "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT", 
   "HGNChelper", "igraph", "ggraph", "scCustomize", "dplyr", 
-  "circlize", "vegan"
+  "circlize", "vegan", "presto"
 )
 cran_new <- cran_packages[!(cran_packages %in% installed.packages()[, "Package"])]
 if(length(cran_new)) {
@@ -58,6 +58,7 @@ library(shinyjs)
 library(gridExtra)
 library(jsonlite)
 library(DT)
+library(presto)
 library(HGNChelper)
 library(igraph)
 library(ggraph)
