@@ -6,7 +6,7 @@ cran_packages <- c(
   "shiny", "shinydashboard", "shinycssloaders", "magrittr", "shinyjs",
   "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT", 
   "HGNChelper", "igraph", "ggraph", "scCustomize", "dplyr", 
-  "circlize", "vegan", "presto"
+  "circlize", "vegan"
 )
 cran_new <- cran_packages[!(cran_packages %in% installed.packages()[, "Package"])]
 if(length(cran_new)) {
@@ -44,6 +44,13 @@ if(length(github_packages)) {
   }
 }
 
+if (!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+}
+
+if (!requireNamespace("presto", quietly = TRUE)) {
+  devtools::install_github("immunogenomics/presto")
+}
 
 ## LOAD LIBRARIES
 library(shiny)
