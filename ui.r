@@ -231,13 +231,31 @@ fluidRow(
       width = 12, id = "overview_tabBox",
       tabPanel("Overview",
         fluidRow(
-          box(width = 6, status = "info", solidHeader = TRUE,
+          box(width = 3, status = "info", solidHeader = TRUE,
               title = "Seurat Object",
               verbatimTextOutput("seu_summary") %>% withSpinner()
           ),
-          box(width = 6, status = "info", solidHeader = TRUE,
+          box(width = 9, status = "info", solidHeader = TRUE,
               title = "Metadata Table",
               DT::dataTableOutput("meta_table") %>% withSpinner()
+          ), 
+          box(width = 12,
+            title = "Subset by Cell Type",
+            status = "info",
+            solidHeader = FALSE,
+
+            radioButtons(
+              "subset_by_celltype",
+              "Subset by cell types?",
+              choices  = list("No" = "no", "Yes" = "yes"),
+              selected = "no",
+              inline   = TRUE
+            ),
+
+            uiOutput("celltype_subset_ui"),
+
+            verbatimTextOutput("celltype_subset_summary"),
+             uiOutput("celltype_subset_message") 
           )
         )
       )
@@ -281,7 +299,7 @@ fluidRow(
               ),
               fluidRow(
                 column(12,
-                       actionButton("apply_subset", "Apply Subset", icon = icon("filter"),
+                       actionButton("apply_subset", "Apply Subset based on QC", icon = icon("filter"),
                                     style = "background:#4CAF50; color:white;"),
                       uiOutput("subset_message"),
                       verbatimTextOutput("subset_summary") %>% withSpinner()))))),

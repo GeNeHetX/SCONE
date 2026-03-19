@@ -76,6 +76,8 @@ source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/gen
 options(shiny.maxRequestSize = 100*1024^3)
 DT::datatable(data.frame(), extensions = "Buttons")
 
+subset_done <- reactiveVal(FALSE)
+celltype_subset_done <- reactiveVal(FALSE)
 
 server <- function(input, output, session) {
   
@@ -426,7 +428,7 @@ observeEvent(input$input_zip, {
     # QC metrics
     # -------------------------
     mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
-    seu[["percent.mt"]] <- PercentageFeatureSet(seu, features = mito_genes)
+    # seu[["percent.mt"]] <- PercentageFeatureSet(seu, features = mito_genes)
 
     if(length(mito_genes) > 0){
       mat_seu = seu@assays$RNA$counts
@@ -475,11 +477,11 @@ observeEvent(input$input_zip, {
         theme_classic()
 
       # p3 <- QC_Histogram(seurat_object = rv$seu, features = "percent_mito", low_cutoff = 15)
-      p3 <- ggplot(df,  aes(x = .data[[split_var]], y = percent.mt)) + 
+      p3 <- ggplot(df,  aes(x = .data[[split_var]], y = percent_mito)) + 
        geom_violin(fill = "salmon") + 
        geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) + 
        geom_hline(yintercept = 20, linetype = "dashed", color = "red") + 
-       labs(y = "percent.mt", x = "", title='Mito Gene % per Cell/Nucleus') + theme_classic()
+       labs(y = "percent_mito", x = "", title='Mito Gene % per Cell/Nucleus') + theme_classic()
 
       df <- df %>% mutate(complexity = nFeature_RNA / nCount_RNA)
       p4 <- ggplot(df,  aes(x = .data[[split_var]],y = complexity)) +
@@ -550,7 +552,6 @@ observeEvent(input$input_zip, {
         )
       })
 
-      subset_done <- reactiveVal(FALSE)
       rv$seu_original <- seu   # copie intacte
       rv$seu <- seu            # objet de travail
       rv$subset_cells <- NULL
@@ -599,8 +600,118 @@ observeEvent(input$input_zip, {
     })
     
   })
+    
+# -------------------------
+# SUBSET BY CELL TYPE
+# -------------------------
 
-  
+# Check si sctype, manual_annot ou published existe
+annot_col_available <- reactive({
+  req(rv$seu)
+  cols  <- colnames(rv$seu@meta.data)
+  found <- grep("sctype|manual_annot|published", cols, value = TRUE, ignore.case = TRUE)
+  if (length(found) == 0) return(NULL)
+  return(sort(found))
+})
+
+output$celltype_subset_ui <- renderUI({
+  req(input$subset_by_celltype == "yes")
+
+  if (is.null(annot_col_available())) {
+    return(tags$p(
+      style = "color:#E53935; font-style:italic;",
+      "No annotation found. Please run ScType, Manual Annotation, or add a published annotation in your zip."
+    ))
+  }
+
+  tagList(
+    selectInput(
+      "celltype_annot_col",
+      "Select annotation to use:",
+      choices  = annot_col_available(),
+      selected = annot_col_available()[1]
+    ),
+    uiOutput("celltype_table_ui"),
+    actionButton(
+      "apply_celltype_subset",
+      "Apply Cell Type Subset",
+      icon  = icon("filter"),
+      style ="background:#4CAF50; color:white; margin-top:10px;"
+    )
+  )
+})
+
+output$celltype_table_ui <- renderUI({
+  req(input$celltype_annot_col)
+  req(rv$seu)
+
+  cell_types <- sort(unique(rv$seu@meta.data[[input$celltype_annot_col]]))
+  cell_types <- cell_types[!is.na(cell_types)]
+
+  checkboxGroupInput(
+    "celltype_keep",
+    "Select cell types to keep:",
+    choices  = cell_types,
+    selected = cell_types
+  )
+})
+
+observeEvent(input$apply_celltype_subset, {
+  req(rv$seu_original)
+  req(input$celltype_annot_col)
+  req(input$celltype_keep)
+
+  annot_col <- input$celltype_annot_col
+
+  if (!(annot_col %in% colnames(rv$seu_original@meta.data))) {
+    rv$seu_original@meta.data[[annot_col]] <- rv$seu@meta.data[[annot_col]][
+      match(rownames(rv$seu_original@meta.data), rownames(rv$seu@meta.data))
+    ]
+  }
+
+  cells_keep <- rownames(rv$seu_original@meta.data)[
+    rv$seu_original@meta.data[[annot_col]] %in% input$celltype_keep
+  ]
+
+  if (length(cells_keep) == 0) {
+    showNotification("No cells found for selected cell types.", type = "error")
+    return()
+  }
+
+  seu_sub <- subset(rv$seu_original, cells = cells_keep)
+
+  new_col_name <- paste0(annot_col, "_subset")
+  seu_sub@meta.data[[new_col_name]] <- seu_sub@meta.data[[annot_col]]
+
+  rv$seu          <- seu_sub
+  rv$subset_cells <- seu_sub
+  rv$meta_choices <- colnames(seu_sub@meta.data)
+  rv$sctype_annotation <- NULL
+
+  append_log(paste(
+    "Cell type subset applied:", length(cells_keep), "cells kept —",
+    paste(input$celltype_keep, collapse = ", ")
+  ))
+
+  celltype_subset_done(TRUE)  
+
+  output$celltype_subset_summary <- renderPrint({
+    cat("Cell type subset summary:\n")
+    cat("Cells kept:", ncol(seu_sub), "\n")
+    cat("Cell types:", paste(input$celltype_keep, collapse = ", "), "\n")
+    cat("Annotation column added:", new_col_name, "\n")
+  })
+})
+
+output$celltype_subset_message <- renderUI({
+  req(celltype_subset_done())
+  tags$span(
+    "→ Cell type subset applied. Run analysis again with your subsetted Seurat object.",
+    style = "margin-left:10px; font-style:italic; color:#666;"
+  )
+})
+
+
   # -------------------------
   # RUN ANALYSIS (subset + normalize + PCA + clustering + UMAP)
   # -------------------------
