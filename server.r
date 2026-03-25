@@ -362,360 +362,368 @@ server <- function(input, output, session) {
 
   })
 
-# -------------------------
-# LOAD FILES AND CREATE SEURAT OBJECT AUTOMATICALLY
-# -------------------------
-observeEvent(input$input_zip, {
-  req(input$input_zip)
-  append_log("Starting Seurat object creation...")
+   # ==============================
+  # FONCTION COMMUNE : initialiser les rv apres chargement seu
+  # ==============================
+  init_seu <- function(seu) {
+    rv$seu          <- seu
+    rv$seu_original <- seu
+    rv$subset_cells <- NULL
+    rv$meta_choices <- colnames(seu@meta.data)
+    rv$meta_base    <- colnames(seu@meta.data)
 
-  # Dossier temporaire unique
-  tmpdir <- file.path(tempdir(), paste0("upload_", as.integer(Sys.time())))
-  dir.create(tmpdir, showWarnings = FALSE)
 
-  tryCatch({
-    append_log("Unzipping input...")
-    unzip(input$input_zip$datapath, exdir = tmpdir)
 
-    # Find matrix / features / barcodes
-    mtx_file <- list.files(tmpdir, pattern = "matrix.*\\.mtx$", full.names = TRUE, ignore.case = TRUE)[1]
-    genes_file <- list.files(tmpdir, pattern = "(^genes|features).*\\.tsv$", full.names = TRUE, ignore.case = TRUE)[1]
-    barcodes_file <- list.files(tmpdir, pattern = "barcodes.*\\.tsv$", full.names = TRUE, ignore.case = TRUE)[1]
 
-    append_log("Reading 10X matrix...")
-    expressionMatrix <- ReadMtx(
-      mtx = mtx_file,
-      cells = barcodes_file,
-      features = genes_file,
-      feature.column = 1,
-      skip.cell = 1,
-      skip.feature = 1,
-      cell.sep = "\t"
+    existing_clusterings <- grep("sctype_|published_|manual_|^(louvain_|kmeans_|leiden_)", colnames(seu@meta.data), value = TRUE)
+    if (length(existing_clusterings) > 0) {
+      updateSelectInput(session, "meta_color_by",
+        choices  = existing_clusterings,
+        selected = existing_clusterings[1]
+      )
+    }
+
+    updateSelectInput(session, "qc_split_meta",
+      choices  = colnames(seu@meta.data),
+      selected = colnames(seu@meta.data)[1]
     )
+  }
+  # ==============================
+  # LOAD ZIP
+  # ==============================
+  observeEvent(input$input_zip, {
+    req(input$input_zip)
+    append_log("Starting Seurat object creation...")
+    tmpdir <- file.path(tempdir(), paste0("upload_", as.integer(Sys.time())))
+    dir.create(tmpdir, showWarnings = FALSE)
 
-    append_log("Creating Seurat object...")
-    seu <- CreateSeuratObject(counts = expressionMatrix)
+    tryCatch({
+      append_log("Unzipping input...")
+      unzip(input$input_zip$datapath, exdir = tmpdir)
 
-    # -------------------------
-    # Read barcode metadata (once)
-    # -------------------------
-    barcode_df <- read.table(barcodes_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE)
+      mtx_file      <- list.files(tmpdir, pattern = "matrix.*\\.mtx$",         full.names = TRUE, ignore.case = TRUE)[1]
+      genes_file    <- list.files(tmpdir, pattern = "(^genes|features).*\\.tsv$", full.names = TRUE, ignore.case = TRUE)[1]
+      barcodes_file <- list.files(tmpdir, pattern = "barcodes.*\\.tsv$",        full.names = TRUE, ignore.case = TRUE)[1]
 
-    if (ncol(barcode_df) > 1) {
-      colnames(barcode_df)[1] <- "barcode"
+      append_log("Reading 10X matrix...")
+      expressionMatrix <- ReadMtx(
+        mtx = mtx_file, cells = barcodes_file, features = genes_file,
+        feature.column = 1, skip.cell = 1, skip.feature = 1, cell.sep = "\t"
+      )
 
-      # garder uniquement les barcodes présents dans Seurat
-      barcode_df <- barcode_df[barcode_df$barcode %in% colnames(seu), , drop = FALSE]
+      append_log("Creating Seurat object...")
+      seu <- CreateSeuratObject(counts = expressionMatrix)
 
-      # mettre dans le même ordre que Seurat
-      barcode_df <- barcode_df[match(colnames(seu), barcode_df$barcode), , drop = FALSE]
-
+      barcode_df <- read.table(barcodes_file, header = TRUE, sep = "\t",
+                               stringsAsFactors = FALSE, check.names = FALSE)
       if (ncol(barcode_df) > 1) {
-        meta_to_add <- barcode_df[, -1, drop = FALSE]  # tout sauf la 1ère colonne
-        rownames(meta_to_add) <- barcode_df$barcode
-
-        # retirer les colonnes déjà présentes pour éviter les doublons
-        meta_to_add <- meta_to_add[, !colnames(meta_to_add) %in% colnames(seu@meta.data), drop = FALSE]
-
-        if(ncol(meta_to_add) > 0) {
-          seu <- AddMetaData(seu, metadata = meta_to_add)
+        colnames(barcode_df)[1] <- "barcode"
+        barcode_df <- barcode_df[barcode_df$barcode %in% colnames(seu), , drop = FALSE]
+        barcode_df <- barcode_df[match(colnames(seu), barcode_df$barcode), , drop = FALSE]
+        if (ncol(barcode_df) > 1) {
+          meta_to_add <- barcode_df[, -1, drop = FALSE]
+          rownames(meta_to_add) <- barcode_df$barcode
+          meta_to_add <- meta_to_add[, !colnames(meta_to_add) %in% colnames(seu@meta.data), drop = FALSE]
+          if (ncol(meta_to_add) > 0) seu <- AddMetaData(seu, metadata = meta_to_add)
         }
       }
-    }
 
-    append_log("Seurat object created with additional barcode metadata if available.")
+      mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
+      if (length(mito_genes) > 0) {
+        mat_seu <- seu@assays$RNA$counts
+        seu$percent_mito <- Matrix::colSums(mat_seu[mito_genes, ]) / Matrix::colSums(mat_seu) * 100
+      } else {
+        seu$percent_mito <- 0
+      }
 
-    # -------------------------
-    # QC metrics
-    # -------------------------
-    mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
-    # seu[["percent.mt"]] <- PercentageFeatureSet(seu, features = mito_genes)
+      rv$files <- list(mtx = mtx_file, genes = genes_file, barcodes = barcodes_file)
+      init_seu(seu)
+      append_log("Seurat object created.")
 
-    if(length(mito_genes) > 0){
-      mat_seu = seu@assays$RNA$counts
-      seu$percent_mito <- Matrix::colSums(mat_seu[mito_genes, ]) / Matrix::colSums(mat_seu) * 100
-    } else {
-      seu$percent_mito <- 0
-    }
-
-    # Stocker Seurat object
-    rv$seu <- seu
-    rv$files <- list(mtx = mtx_file, genes = genes_file, barcodes = barcodes_file)
-    append_log("Seurat object created.")
-
-    # -------------------------
-    # QC plots
-    # -------------------------
-    observe({
-      req(rv$seu)
-      
-      updateSelectInput(
-        session,
-        "qc_split_meta",
-        choices = colnames(rv$seu@meta.data),
-        selected = colnames(rv$seu@meta.data)[1]
-      )
-    })
-
-
-    output$qc_violin <- renderPlot({
-      req(rv$seu)
-      df <- rv$seu@meta.data
-      split_var <- input$qc_split_meta
-
-      p1 <- ggplot(df,  aes(x = .data[[split_var]],y = nFeature_RNA)) +
-        geom_violin(fill = "lightblue") +
-        geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
-        geom_hline(yintercept = c(600, 5500), linetype = "dashed", color = "red") +
-        labs(y = "nFeature_RNA", x = "", title = 'Gene per Cell/Nucleus') +
-        theme_classic()
-
-      p2 <- ggplot(df,  aes(x = .data[[split_var]],y = nCount_RNA)) +
-        geom_violin(fill = "lightgreen") +
-        geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
-        geom_hline(yintercept = c(1200, 45000), linetype = "dashed", color = "red") +
-        labs(y = "nCount_RNA", x = "", title= 'UMI per Cell/Nucleus') +
-        theme_classic()
-
-      # p3 <- QC_Histogram(seurat_object = rv$seu, features = "percent_mito", low_cutoff = 15)
-      p3 <- ggplot(df,  aes(x = .data[[split_var]], y = percent_mito)) + 
-       geom_violin(fill = "salmon") + 
-       geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) + 
-       geom_hline(yintercept = 20, linetype = "dashed", color = "red") + 
-       labs(y = "percent_mito", x = "", title='Mito Gene % per Cell/Nucleus') + theme_classic()
-
-      df <- df %>% mutate(complexity = nFeature_RNA / nCount_RNA)
-      p4 <- ggplot(df,  aes(x = .data[[split_var]],y = complexity)) +
-        geom_violin(fill = "lightgrey") +
-        geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
-        geom_hline(yintercept = 0.8, linetype = "dashed", color = "red") +
-        labs(y = "Complexity (nFeature/nCount)", x = "", title="Cell complexity") +
-        theme_classic()
-
-      grid.arrange(p1, p2, p3, p4, ncol = 4)
-    })
-
-    output$qc_scatter1 <- renderPlot({
-      QC_Plot_UMIvsGene(seurat_object = rv$seu, low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max,
-                        low_cutoff_UMI = 500, high_cutoff_UMI = input$high_cutoff_UMI)
-    })
-
-    output$qc_scatter2 <- renderPlot({
-      QC_Plot_GenevsFeature(seurat_object = rv$seu, feature1 = "percent_mito",
-                            low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max, high_cutoff_feature = input$percent_mt_max)
-    })
-
-    output$qc_scatter3 <- renderPlot({
-      QC_Plot_UMIvsGene(seurat_object = rv$seu, meta_gradient_name = "percent_mito",
-                        low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max, high_cutoff_UMI = input$high_cutoff_UMI,
-                        meta_gradient_low_cutoff = input$percent_mt_max)
-    })
-
-    output$qc_scatter4 <- renderPlot({
-      QC_Plot_UMIvsGene(seurat_object = rv$seu, meta_gradient_name = "percent_mito",
-                        low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max, high_cutoff_UMI = input$high_cutoff_UMI)
-    })
-
-    # -------------------------
-    # SHOW SUMMARY / OVERVIEW
-    # -------------------------
-    output$seu_summary <- renderPrint({
-      req(rv$seu)
-      rv$seu
-    })
-
-    # Stocker colonnes existantes pour la table DT
-    rv$meta_base <- colnames(rv$seu@meta.data)
-
-   output$meta_table <- DT::renderDataTable({
-        req(rv$seu)
-        
-        # toutes les colonnes dynamiques + base
-        all_cols <- c(rv$meta_base, grep("sampleID|^published|^(louvain_|kmeans_|leiden_|sctype_|manual_)", 
-                                        colnames(rv$seu@meta.data), value = TRUE))
-        
-        base_names <- sub("\\.\\d+$", "", all_cols)
-        keep_idx <- match(unique(base_names), base_names)
-        meta_to_show <- rv$seu@meta.data[, all_cols[keep_idx], drop = FALSE]
-        DT::datatable(meta_to_show, options = list(pageLength = 10, scrollX = TRUE))
-    })
-
-
-      # -------------------------
-      # SUBSET UI (threshold inputs)
-      # -------------------------
-      output$subset_ui <- renderUI({
-        req(rv$seu)
-        tagList(
-          numericInput("nFeature_min", "Min nFeature_RNA", value = 200),
-          numericInput("nFeature_max", "Max nFeature_RNA", value = 5000),
-          numericInput("high_cutoff_UMI", "Max UMI", value = 45000)
-        )
-      })
-
-      rv$seu_original <- seu   # copie intacte
-      rv$seu <- seu            # objet de travail
-      rv$subset_cells <- NULL
-
-
-      observeEvent(input$apply_subset, {
-          subset_done(TRUE)
-          req(rv$seu_original)
-          
-          # Appliquer le subset
-          cells_keep <- WhichCells(rv$seu_original, expression = 
-                                    nFeature_RNA >= input$nFeature_min &
-                                    nFeature_RNA <= input$nFeature_max )#&
-                                    # percent.mt <= input$percent_mt_max)
-          
-          rv$subset_cells <- subset(rv$seu_original, cells = cells_keep)
-          rv$seu <- rv$subset_cells
-
-          # Log
-          append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
-          
-          # Rendu du Seurat object subset avec nb de cellules et features
-          output$subset_summary <- renderPrint({
-            req(rv$subset_cells)
-            cat("Subset Seurat object summary:\n")
-            cat("Number of cells:", ncol(rv$subset_cells), "\n")
-            cat("Number of features:", nrow(rv$subset_cells), "\n")
-          })
-        })
-        
-        seu <- if (!is.null(rv$subset_cells)) rv$subset_cells else rv$seu_original
-            
-        output$subset_message <- renderUI({
-            req(subset_done())
-
-            tags$span(
-              "→ Run analysis again with you subsetted Seurat object",
-              style = "margin-left:10px; font-style:italic; color:#666;"
-            )
-          })
-
-
-    }, error = function(e){
+    }, error = function(e) {
       append_log(paste("ERROR:", e$message))
       showNotification(paste("Error:", e$message), type = "error", duration = 8)
     })
-    
   })
-    
-# -------------------------
-# SUBSET BY CELL TYPE
-# -------------------------
 
-# Check si sctype, manual_annot ou published existe
-annot_col_available <- reactive({
-  req(rv$seu)
-  cols  <- colnames(rv$seu@meta.data)
-  found <- grep("sctype|manual_annot|published", cols, value = TRUE, ignore.case = TRUE)
-  if (length(found) == 0) return(NULL)
-  return(sort(found))
-})
 
-output$celltype_subset_ui <- renderUI({
-  req(input$subset_by_celltype == "yes")
+  # ==============================
+  # LOAD RDS
+  # ==============================
+  observeEvent(input$input_rds, {
+    req(input$input_rds)
+    append_log("Loading Seurat RDS object...")
 
-  if (is.null(annot_col_available())) {
-    return(tags$p(
-      style = "color:#E53935; font-style:italic;",
-      "No annotation found. Please run ScType, Manual Annotation, or add a published annotation in your zip."
-    ))
-  }
+    withProgress(message = "Loading Seurat object...", {
+      tryCatch({
+        seu <- readRDS(input$input_rds$datapath)
 
-  tagList(
-    selectInput(
-      "celltype_annot_col",
-      "Select annotation to use:",
-      choices  = annot_col_available(),
-      selected = annot_col_available()[1]
-    ),
-    uiOutput("celltype_table_ui"),
-    actionButton(
-      "apply_celltype_subset",
-      "Apply Cell Type Subset",
-      icon  = icon("filter"),
-      style ="background:#4CAF50; color:white; margin-top:10px;"
+        if (!inherits(seu, "Seurat")) {
+          showNotification("The uploaded file is not a valid Seurat object.", type = "error")
+          return()
+        }
+
+        if (!"percent_mito" %in% colnames(seu@meta.data)) {
+          mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
+          if (length(mito_genes) > 0) {
+            mat_seu <- seu@assays$RNA$counts
+            seu$percent_mito <- Matrix::colSums(mat_seu[mito_genes, ]) / Matrix::colSums(mat_seu) * 100
+          } else {
+            seu$percent_mito <- 0
+          }
+        }
+
+        init_seu(seu)
+
+        existing_clusterings <- grep("^(louvain_|kmeans_|leiden_)", colnames(seu@meta.data), value = TRUE)
+        append_log(paste(
+          "Seurat object loaded successfully:",
+          ncol(seu), "cells,", nrow(seu), "features.",
+          if ("umap" %in% names(seu@reductions)) "UMAP detected." else "No UMAP found.",
+          if (length(existing_clusterings) > 0) paste("Clusterings:", paste(existing_clusterings, collapse = ", ")) else "No clustering found."
+        ))
+
+        showNotification(
+          paste("Seurat object loaded:", ncol(seu), "cells,", nrow(seu), "genes."),
+          type = "message"
+        )
+
+      }, error = function(e) {
+        append_log(paste("ERROR loading RDS:", e$message))
+        showNotification(paste("Error loading RDS:", e$message), type = "error", duration = 8)
+      })
+    })
+  })
+
+  # ==============================
+  # SAVE RDS
+  # ==============================
+  output$download_seurat_rds <- downloadHandler(
+    filename = function() paste0("SeuratObject_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".rds"),
+    content  = function(file) {
+      req(rv$seu)
+      withProgress(message = "Saving Seurat object...", saveRDS(rv$seu, file))
+      append_log(paste("Seurat object saved:", format(Sys.time(), "%Y%m%d_%H%M%S")))
+    }
+  )
+
+  # ==============================
+  # OUTPUTS GLOBAUX — Summary / Meta
+  # ==============================
+  output$seu_summary <- renderPrint({
+    req(rv$seu)
+    rv$seu
+  })
+
+  output$meta_table <- DT::renderDataTable({
+    req(rv$seu)
+    DT::datatable(rv$seu@meta.data, options = list(pageLength = 10, scrollX = TRUE))
+  })
+
+  output$subset_ui <- renderUI({
+    req(rv$seu)
+    tagList(
+      numericInput("nFeature_min", "Min nFeature_RNA",  value = 200),
+      numericInput("nFeature_max", "Max nFeature_RNA",  value = 5000),
+      numericInput("high_cutoff_UMI", "Max UMI",        value = 45000)
     )
-  )
-})
-
-output$celltype_table_ui <- renderUI({
-  req(input$celltype_annot_col)
-  req(rv$seu)
-
-  cell_types <- sort(unique(rv$seu@meta.data[[input$celltype_annot_col]]))
-  cell_types <- cell_types[!is.na(cell_types)]
-
-  checkboxGroupInput(
-    "celltype_keep",
-    "Select cell types to keep:",
-    choices  = cell_types,
-    selected = cell_types
-  )
-})
-
-observeEvent(input$apply_celltype_subset, {
-  req(rv$seu_original)
-  req(input$celltype_annot_col)
-  req(input$celltype_keep)
-
-  annot_col <- input$celltype_annot_col
-
-  if (!(annot_col %in% colnames(rv$seu_original@meta.data))) {
-    rv$seu_original@meta.data[[annot_col]] <- rv$seu@meta.data[[annot_col]][
-      match(rownames(rv$seu_original@meta.data), rownames(rv$seu@meta.data))
-    ]
-  }
-
-  cells_keep <- rownames(rv$seu_original@meta.data)[
-    rv$seu_original@meta.data[[annot_col]] %in% input$celltype_keep
-  ]
-
-  if (length(cells_keep) == 0) {
-    showNotification("No cells found for selected cell types.", type = "error")
-    return()
-  }
-
-  seu_sub <- subset(rv$seu_original, cells = cells_keep)
-
-  new_col_name <- paste0(annot_col, "_subset")
-  seu_sub@meta.data[[new_col_name]] <- seu_sub@meta.data[[annot_col]]
-
-  rv$seu          <- seu_sub
-  rv$subset_cells <- seu_sub
-  rv$meta_choices <- colnames(seu_sub@meta.data)
-  rv$sctype_annotation <- NULL
-
-  append_log(paste(
-    "Cell type subset applied:", length(cells_keep), "cells kept —",
-    paste(input$celltype_keep, collapse = ", ")
-  ))
-
-  celltype_subset_done(TRUE)  
-
-  output$celltype_subset_summary <- renderPrint({
-    cat("Cell type subset summary:\n")
-    cat("Cells kept:", ncol(seu_sub), "\n")
-    cat("Cell types:", paste(input$celltype_keep, collapse = ", "), "\n")
-    cat("Annotation column added:", new_col_name, "\n")
   })
-})
 
-output$celltype_subset_message <- renderUI({
-  req(celltype_subset_done())
-  tags$span(
-    "→ Cell type subset applied. Run analysis again with your subsetted Seurat object.",
-    style = "margin-left:10px; font-style:italic; color:#666;"
-  )
-})
+  output$subset_message <- renderUI({
+    req(subset_done())
+    tags$span(
+      "→ Run analysis again with your subsetted Seurat object",
+      style = "margin-left:10px; font-style:italic; color:#666;"
+    )
+  })
 
+  # ==============================
+  # QC PLOTS — GLOBAUX
+  # ==============================
+  observe({
+    req(rv$seu)
+    updateSelectInput(session, "qc_split_meta",
+      choices  = colnames(rv$seu@meta.data),
+      selected = colnames(rv$seu@meta.data)[1]
+    )
+  })
 
-  # -------------------------
-  # RUN ANALYSIS (subset + normalize + PCA + clustering + UMAP)
-  # -------------------------
+  output$qc_violin <- renderPlot({
+    req(rv$seu)
+    req(input$qc_split_meta)
+    req(input$qc_split_meta %in% colnames(rv$seu@meta.data))
+
+    df        <- rv$seu@meta.data
+    split_var <- input$qc_split_meta
+
+    p1 <- ggplot(df, aes(x = .data[[split_var]], y = nFeature_RNA)) +
+      geom_violin(fill = "lightblue") + geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
+      geom_hline(yintercept = c(600, 5500), linetype = "dashed", color = "red") +
+      labs(y = "nFeature_RNA", x = "", title = "Gene per Cell/Nucleus") + theme_classic()
+
+    p2 <- ggplot(df, aes(x = .data[[split_var]], y = nCount_RNA)) +
+      geom_violin(fill = "lightgreen") + geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
+      geom_hline(yintercept = c(1200, 45000), linetype = "dashed", color = "red") +
+      labs(y = "nCount_RNA", x = "", title = "UMI per Cell/Nucleus") + theme_classic()
+
+    if ("percent_mito" %in% colnames(df)) {
+      p3 <- ggplot(df, aes(x = .data[[split_var]], y = percent_mito)) +
+        geom_violin(fill = "salmon") + geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
+        geom_hline(yintercept = 20, linetype = "dashed", color = "red") +
+        labs(y = "percent_mito", x = "", title = "Mito Gene % per Cell/Nucleus") + theme_classic()
+    } else {
+      p3 <- ggplot() + ggtitle("percent_mito not found") + theme_classic()
+    }
+
+    df <- df %>% mutate(complexity = nFeature_RNA / nCount_RNA)
+    p4 <- ggplot(df, aes(x = .data[[split_var]], y = complexity)) +
+      geom_violin(fill = "lightgrey") + geom_jitter(width = 0.2, size = 0.5, alpha = 0.5) +
+      geom_hline(yintercept = 0.8, linetype = "dashed", color = "red") +
+      labs(y = "Complexity (nFeature/nCount)", x = "", title = "Cell complexity") + theme_classic()
+
+    grid.arrange(p1, p2, p3, p4, ncol = 4)
+  })
+
+  output$qc_scatter1 <- renderPlot({
+    req(rv$seu)
+    QC_Plot_UMIvsGene(seurat_object = rv$seu, low_cutoff_gene = input$nFeature_min,
+                      high_cutoff_gene = input$nFeature_max, low_cutoff_UMI = 500,
+                      high_cutoff_UMI = input$high_cutoff_UMI)
+  })
+
+  output$qc_scatter2 <- renderPlot({
+    req(rv$seu)
+    QC_Plot_GenevsFeature(seurat_object = rv$seu, feature1 = "percent_mito",
+                          low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max,
+                          high_cutoff_feature = input$percent_mt_max)
+  })
+
+  output$qc_scatter3 <- renderPlot({
+    req(rv$seu)
+    QC_Plot_UMIvsGene(seurat_object = rv$seu, meta_gradient_name = "percent_mito",
+                      low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max,
+                      high_cutoff_UMI = input$high_cutoff_UMI,
+                      meta_gradient_low_cutoff = input$percent_mt_max)
+  })
+
+  output$qc_scatter4 <- renderPlot({
+    req(rv$seu)
+    QC_Plot_UMIvsGene(seurat_object = rv$seu, meta_gradient_name = "percent_mito",
+                      low_cutoff_gene = input$nFeature_min, high_cutoff_gene = input$nFeature_max,
+                      high_cutoff_UMI = input$high_cutoff_UMI)
+  })
+
+  # ==============================
+  # SUBSET QC
+  # ==============================
+  observeEvent(input$apply_subset, {
+    subset_done(TRUE)
+    req(rv$seu_original)
+
+    cells_keep <- WhichCells(rv$seu_original, expression =
+      nFeature_RNA >= input$nFeature_min & nFeature_RNA <= input$nFeature_max)
+
+    rv$subset_cells <- subset(rv$seu_original, cells = cells_keep)
+    rv$seu          <- rv$subset_cells
+    append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
+
+    output$subset_summary <- renderPrint({
+      req(rv$subset_cells)
+      cat("Subset Seurat object summary:\n")
+      cat("Number of cells:", ncol(rv$subset_cells), "\n")
+      cat("Number of features:", nrow(rv$subset_cells), "\n")
+    })
+  })
+
+  # ==============================
+  # SUBSET BY CELL TYPE
+  # ==============================
+  annot_col_available <- reactive({
+    req(rv$seu)
+    cols  <- colnames(rv$seu@meta.data)
+    found <- grep("sctype|manual_annot|published", cols, value = TRUE, ignore.case = TRUE)
+    if (length(found) == 0) return(NULL)
+    return(sort(found))
+  })
+
+  output$celltype_subset_ui <- renderUI({
+    req(input$subset_by_celltype == "yes")
+    if (is.null(annot_col_available())) {
+      return(tags$p(style = "color:#E53935; font-style:italic;",
+        "No annotation found. Please run ScType, Manual Annotation, or add a published annotation."))
+    }
+    tagList(
+      selectInput("celltype_annot_col", "Select annotation to use:",
+        choices = annot_col_available(), selected = annot_col_available()[1]),
+      uiOutput("celltype_table_ui"),
+      actionButton("apply_celltype_subset", "Apply Cell Type Subset",
+        icon = icon("filter"), style = "background:#4CAF50; color:white; margin-top:10px;")
+    )
+  })
+
+  output$celltype_table_ui <- renderUI({
+    req(input$celltype_annot_col)
+    req(rv$seu)
+    cell_types <- sort(unique(rv$seu@meta.data[[input$celltype_annot_col]]))
+    cell_types <- cell_types[!is.na(cell_types)]
+    checkboxGroupInput("celltype_keep", "Select cell types to keep:",
+      choices = cell_types, selected = cell_types)
+  })
+
+  observeEvent(input$apply_celltype_subset, {
+    req(rv$seu_original)
+    req(input$celltype_annot_col)
+    req(input$celltype_keep)
+
+    annot_col <- input$celltype_annot_col
+
+    if (!(annot_col %in% colnames(rv$seu_original@meta.data))) {
+      rv$seu_original@meta.data[[annot_col]] <- rv$seu@meta.data[[annot_col]][
+        match(rownames(rv$seu_original@meta.data), rownames(rv$seu@meta.data))]
+    }
+
+    cells_keep <- rownames(rv$seu_original@meta.data)[
+      rv$seu_original@meta.data[[annot_col]] %in% input$celltype_keep]
+
+    if (length(cells_keep) == 0) {
+      showNotification("No cells found for selected cell types.", type = "error")
+      return()
+    }
+
+    seu_sub <- subset(rv$seu_original, cells = cells_keep)
+    new_col_name <- paste0(annot_col, "_subset")
+    seu_sub@meta.data[[new_col_name]] <- seu_sub@meta.data[[annot_col]]
+
+    rv$seu               <- seu_sub
+    rv$subset_cells      <- seu_sub
+    rv$meta_choices      <- colnames(seu_sub@meta.data)
+    rv$sctype_annotation <- NULL
+    rv$manual_annot      <- NULL
+
+    append_log(paste("Cell type subset applied:", length(cells_keep), "cells kept —",
+      paste(input$celltype_keep, collapse = ", ")))
+
+    celltype_subset_done(TRUE)
+
+    output$celltype_subset_summary <- renderPrint({
+      cat("Cell type subset summary:\n")
+      cat("Cells kept:", ncol(seu_sub), "\n")
+      cat("Cell types:", paste(input$celltype_keep, collapse = ", "), "\n")
+      cat("Annotation column added:", new_col_name, "\n")
+    })
+  })
+
+  output$celltype_subset_message <- renderUI({
+    req(celltype_subset_done())
+    tags$span(
+      "→ Cell type subset applied. Run analysis again with your subsetted Seurat object.",
+      style = "margin-left:10px; font-style:italic; color:#666;"
+    )
+  })
+
+  # ==============================
+  # RUN ANALYSIS
+  # ==============================
   observeEvent(input$run_analysis, {
     req(rv$seu)
     shinyjs::disable("run_analysis")
@@ -724,74 +732,58 @@ output$celltype_subset_message <- renderUI({
     tryCatch({
       seu <- rv$seu
 
-      # Apply subset if thresholds defined
-      if (!is.null(input$nFeature_min) && !is.null(input$nFeature_max) && !is.null(input$percent_mt_max)) { #!is.null(input$percent_mt_max)
-        cells_keep <- WhichCells(seu, expression = 
-                                   nFeature_RNA >= input$nFeature_min &
-                                   nFeature_RNA <= input$nFeature_max #&
-        )
-                                  #  percent.mt <= input$percent_mt_max)
+      if (!is.null(input$nFeature_min) && !is.null(input$nFeature_max)) {
+        cells_keep <- WhichCells(seu, expression =
+          nFeature_RNA >= input$nFeature_min & nFeature_RNA <= input$nFeature_max)
         seu <- subset(seu, cells = cells_keep)
         append_log(paste("Subset applied:", length(cells_keep), "cells kept"))
-      } else {
-        append_log("No subset thresholds applied; running on all cells")
       }
 
-      # Normalize, HVG, Scale, PCA
       append_log("Normalizing data...")
       seu <- NormalizeData(seu, verbose = FALSE)
-      append_log(paste("Finding variable features (n=", input$n_hvg, ")", sep=""))
-      seu <- FindVariableFeatures(seu, selection.method="vst", nfeatures=input$n_hvg, verbose=FALSE)
+      append_log(paste("Finding variable features (n=", input$n_hvg, ")", sep = ""))
+      seu <- FindVariableFeatures(seu, selection.method = "vst", nfeatures = input$n_hvg, verbose = FALSE)
       append_log("Scaling data...")
       seu <- ScaleData(seu, verbose = FALSE)
-      append_log(paste("Running PCA (npcs=", input$n_pcs, ")", sep=""))
+      append_log(paste("Running PCA (npcs=", input$n_pcs, ")", sep = ""))
       seu <- RunPCA(seu, npcs = input$n_pcs, verbose = FALSE)
 
-      # Clustering
       if (input$clust_method == "louvain") {
         cluster_name <- paste0("louvain_n", input$knn, "_res", input$resolution)
-        append_log(paste("Running Louvain clustering:", cluster_name))
         seu <- FindNeighbors(seu, dims = 1:input$n_pcs, k.param = input$knn)
         seu <- FindClusters(seu, resolution = input$resolution)
         seu@meta.data[[cluster_name]] <- Idents(seu)
-        Idents(seu) <- seu@meta.data[[cluster_name]]
 
       } else if (input$clust_method == "leiden") {
         cluster_name <- paste0("leiden_n", input$leiden_k, "_res", input$resolution)
-        append_log(paste("Running Leiden clustering:", cluster_name))
         seu <- FindNeighbors(seu, dims = 1:input$n_pcs, k.param = input$leiden_k)
-        seu <- FindClusters(seu, resolution = input$resolution, algorithm = 4) # 4 = Leiden
+        seu <- FindClusters(seu, resolution = input$resolution, algorithm = 4)
         seu@meta.data[[cluster_name]] <- Idents(seu)
-        Idents(seu) <- seu@meta.data[[cluster_name]]
 
-      } else { # kmeans
+      } else {
         cluster_name <- paste0("kmeans_n", input$kmeans_centers, "_res", input$resolution)
-        append_log(paste("Running K-means clustering:", cluster_name))
         pca_emb <- Embeddings(seu, "pca")[, 1:input$n_pcs, drop = FALSE]
         km <- kmeans(pca_emb, centers = input$kmeans_centers)
         seu@meta.data[[cluster_name]] <- as.factor(km$cluster)
-        Idents(seu) <- seu@meta.data[[cluster_name]]
       }
 
-      # UMAP
+      Idents(seu) <- seu@meta.data[[cluster_name]]
+
       if (!"umap" %in% names(seu@reductions)) {
         append_log("Running UMAP...")
         seu <- RunUMAP(seu, dims = 1:input$n_pcs, verbose = FALSE)
       }
 
-      rv$seu <- seu
-      rv$meta_choices <- grep("sampleID|^published|^(louvain_|kmeans_|leiden_)", names(seu@meta.data), value = TRUE)
+      rv$seu          <- seu
+      rv$meta_choices <- grep("sampleID|^published|sctye_|manual_|^(louvain_|kmeans_|leiden_)", names(seu@meta.data), value = TRUE)
       append_log(paste("Clustering done:", cluster_name))
       append_log("Analysis completed.")
 
       updateSelectInput(session, "meta_color_by", choices = rv$meta_choices, selected = cluster_name)
-      output$metadata_selector <- renderUI({
-        selectInput("meta_choice", "Select metadata for plotting", choices = rv$meta_choices)
-      })
 
-    }, error = function(e){
+    }, error = function(e) {
       append_log(paste("ERROR:", e$message))
-      showNotification(paste("Error:", e$message), type="error", duration = 8)
+      showNotification(paste("Error:", e$message), type = "error", duration = 8)
     })
   })
 
@@ -824,15 +816,95 @@ output$celltype_subset_message <- renderUI({
     paste(rev(rv$log), collapse = "\n")
   })
  
+# -------------------------
+# SAVE SEURAT OBJECT
+# -------------------------
+output$download_seurat_rds <- downloadHandler(
+  filename = function() {
+    paste0("SeuratObject_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".rds")
+  },
+  content = function(file) {
+    req(rv$seu)
+    withProgress(message = "Saving Seurat object...", {
+      saveRDS(rv$seu, file)
+    })
+    append_log(paste("Seurat object saved:", format(Sys.time(), "%Y%m%d_%H%M%S")))
+  }
+)
+
+# -------------------------
+# LOAD SEURAT RDS
+# -------------------------
+observeEvent(input$input_rds, {
+  req(input$input_rds)
+  append_log("Loading Seurat RDS object...")
+
+ withProgress(message = "Loading Seurat object...", {
+  tryCatch({
+    seu <- readRDS(input$input_rds$datapath)
+
+    if (!inherits(seu, "Seurat")) {
+      showNotification("The uploaded file is not a valid Seurat object.", type = "error")
+      return()
+    }
+
+    # Recalculer percent_mito si absent
+    if (!"percent_mito" %in% colnames(seu@meta.data)) {
+      mito_genes <- grep("^MT-", rownames(seu), value = TRUE)
+      if (length(mito_genes) > 0) {
+        mat_seu <- seu@assays$RNA$counts
+        seu$percent_mito <- Matrix::colSums(mat_seu[mito_genes, ]) / Matrix::colSums(mat_seu) * 100
+      } else {
+        seu$percent_mito <- 0
+      }
+    }
+
+    rv$seu_original <- seu
+    rv$seu          <- seu
+    rv$subset_cells <- NULL
+    rv$meta_choices <- colnames(seu@meta.data)
+    rv$meta_base    <- colnames(seu@meta.data)
+
+    # Mettre a jour les selectInputs si UMAP/clustering existe
+    existing_clusterings <- grep("sctype_|published_|manual_|sampleID|^(louvain_|kmeans_|leiden_)", colnames(seu@meta.data), value = TRUE)
+    if (length(existing_clusterings) > 0) {
+      sorted_choices <- sort(existing_clusterings)
+      updateSelectInput(session, "meta_color_by", choices = sorted_choices, selected = sorted_choices[1])
+      rv$meta_choices <- existing_clusterings
+    }
+
+    # Cle : mettre a jour qc_split_meta pour declencher les violin plots
+    updateSelectInput(
+      session,
+      "qc_split_meta",
+      choices  = colnames(seu@meta.data),
+      selected = colnames(seu@meta.data)[1]
+    )
+
+    append_log(paste(
+      "Seurat object loaded successfully:",
+      ncol(seu), "cells,",
+      nrow(seu), "features.",
+      if ("umap" %in% names(seu@reductions)) "UMAP detected." else "No UMAP found.",
+      if (length(existing_clusterings) > 0) paste("Clusterings found:", paste(existing_clusterings, collapse = ", ")) else "No clustering found."
+    ))
+
+    showNotification(
+      paste("Seurat object loaded:", ncol(seu), "cells,", nrow(seu), "genes."),
+      type = "message"
+    )
+
+  }, error = function(e) {
+    append_log(paste("ERROR loading RDS:", e$message))
+    showNotification(paste("Error loading RDS:", e$message), type = "error", duration = 8)
+  })
+
+  })
+})
+
   # -------------------------
-  # UMAP plots
+  # UMAP duplicates plots
   # -------------------------
-  # output$umapPlot <- renderPlot({
-  #   req(rv$seu)
-  #   tryCatch({
-  #     DimPlot(rv$seu, reduction = "umap", label = TRUE, repel = TRUE) + ggtitle("UMAP - clusters")
-  #   }, error = function(e) ggplot() + ggtitle("Unable to plot UMAP"))
-  # })
     # UMAP pour Violin
   output$umapViolinPlot <- renderPlot({
     req(rv$seu)
@@ -1246,7 +1318,7 @@ output$celltype_subset_message <- renderUI({
   # -------------------------
   output$download_top_markers_tsv <- downloadHandler(
     filename = function() {
-      paste0("top_markers_all_clusters_", Sys.Date(), ".tsv")
+      paste0("top_markers_all_clusters_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".tsv")
     },
     content = function(file) {
       req(rv$seu)
@@ -1722,6 +1794,27 @@ output$celltype_subset_message <- renderUI({
         labs(title = "Signature scores per cluster")
     })
 
+    output$download_sig_scores <- downloadHandler(
+      filename = function() {
+         paste0("signature_scores_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".tsv")
+      },
+      content = function(file) {
+        req(rv$signature_seu)
+        req(rv$selected_sig_names)
+
+        n_sigs     <- length(rv$selected_sig_names)
+        score_cols <- paste0("SigScore_", seq_len(n_sigs))
+        score_cols <- score_cols[score_cols %in% colnames(rv$signature_seu@meta.data)]
+
+        df_export <- rv$signature_seu@meta.data[, score_cols, drop = FALSE]
+        colnames(df_export) <- rv$selected_sig_names
+        df_export$cell_barcode <- rownames(df_export)
+        df_export <- df_export[, c("cell_barcode", rv$selected_sig_names)]
+
+        write.table(df_export, file, sep = "\t", row.names = FALSE, quote = FALSE)
+      }
+    )
+
     # -----------------------
     # Annotate manual clusters
     # -----------------------
@@ -1810,7 +1903,7 @@ output$celltype_subset_message <- renderUI({
 
     output$download_umap_pdf <- downloadHandler(
       filename = function() {
-        paste0("UMAP_annotated_", Sys.Date(), ".pdf")
+        paste0("UMAP_annotated_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".pdf")
       },
       content = function(file) {
         req(rv$seu)
@@ -1849,7 +1942,7 @@ output$celltype_subset_message <- renderUI({
       }
     )
     output$download_metadata_csv <- downloadHandler(
-      filename = function() { paste0("metadata_with_labels_", Sys.Date(), ".csv") },
+      filename = function() { paste0("metadata_with_labels_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv") },
       content = function(file) {
         req(rv$seu)
         req(input$annot_split_meta)
@@ -2051,7 +2144,7 @@ output$pseudobulk_heatmap <- renderPlot({
 # ---- DOWNLOAD PDF ----
 output$download_pseudobulk_pdf <- downloadHandler(
   filename = function() {
-    paste0("pseudobulk_heatmap_", Sys.Date(), ".pdf")
+    paste0("pseudobulk_heatmap_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".pdf")
   },
   content = function(file) {
     req(rv$pseudobulk_data())

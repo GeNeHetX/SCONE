@@ -39,6 +39,7 @@ ui <- dashboardPage(
     br(),
     br(),
     fileInput("input_zip", "Upload scRNA zipfolder :\n 1 matrix.mtx + 1 barcodes.tsv & 1 features.tsv", accept = ".zip"),
+    fileInput("input_rds", "Or load a saved SCONE object (.rds)", accept = ".rds"),
     tags$hr(),
     h4("Seurat Settings"),
     numericInput("n_hvg", "High Variable Genes (HVG)", value = 1000),
@@ -233,7 +234,13 @@ fluidRow(
         fluidRow(
           box(width = 3, status = "info", solidHeader = TRUE,
               title = "Seurat Object",
-              verbatimTextOutput("seu_summary") %>% withSpinner()
+              verbatimTextOutput("seu_summary") %>% withSpinner(),
+              hr(),
+              downloadButton(
+                "download_seurat_rds",
+                "Save SCONE Object (.rds)",
+                icon  = icon("floppy-disk")
+              )
           ),
           box(width = 9, status = "info", solidHeader = TRUE,
               title = "Metadata Table",
@@ -478,7 +485,13 @@ tabPanel("Annotation (ScType)",
                 actionButton(
                   "run_signature_projection",
                   "Run signature projection",
-                  icon = icon("play")
+                  icon = icon("play"),
+                  style = "background:#4CAF50; color:white;"
+                ),
+                downloadButton(
+                  "download_sig_scores",
+                  "Download signature scores",
+                  icon  = icon("download")
                 )
               )
             ),
