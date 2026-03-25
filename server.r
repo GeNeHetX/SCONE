@@ -6,7 +6,7 @@ cran_packages <- c(
   "shiny", "shinydashboard", "shinycssloaders", "magrittr", "shinyjs",
   "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT", 
   "HGNChelper", "igraph", "ggraph", "scCustomize", "dplyr", 
-  "circlize", "vegan"
+  "circlize", "vegan", "colourpicker"
 )
 cran_new <- cran_packages[!(cran_packages %in% installed.packages()[, "Package"])]
 if(length(cran_new)) {
@@ -71,6 +71,7 @@ library(vegan)
 library(CancerRNASig)
 library(viridis)
 library(colorspace)
+library(colourpicker)
 
 source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/gene_sets_prepare.R"); source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/sctype_score_.R")
 
@@ -865,12 +866,13 @@ observeEvent(input$input_rds, {
     rv$meta_choices <- colnames(seu@meta.data)
     rv$meta_base    <- colnames(seu@meta.data)
 
+
     # Mettre a jour les selectInputs si UMAP/clustering existe
     existing_clusterings <- grep("sctype_|published_|manual_|sampleID|^(louvain_|kmeans_|leiden_)", colnames(seu@meta.data), value = TRUE)
     if (length(existing_clusterings) > 0) {
       sorted_choices <- sort(existing_clusterings)
       updateSelectInput(session, "meta_color_by", choices = sorted_choices, selected = sorted_choices[1])
-      rv$meta_choices <- existing_clusterings
+      rv$meta_choices <- colnames(seu@meta.data)
     }
 
     # Cle : mettre a jour qc_split_meta pour declencher les violin plots
@@ -1831,22 +1833,30 @@ observeEvent(input$input_rds, {
     })
 
       output$cluster_labels_ui <- renderUI({
-        req(rv$seu)
-        req(input$annot_split_meta)
-        clusters <- sort(unique(rv$seu@meta.data[[input$annot_split_meta]]))
-        tagList(
-          lapply(clusters, function(cl){
-            fluidRow(
-              column(5, textInput(paste0("label_", cl), 
-                                  label = paste("Cluster", cl, "label"), 
-                                  value = cl)),
-              column(5, textInput(paste0("color_", cl), 
-                                  label = "Color (hex)", 
-                                  value = rainbow(length(clusters))[which(clusters==cl)]))
-            )
-          })
-        )
-      })
+      req(rv$seu)
+      req(input$annot_split_meta)
+
+      clusters <- sort(unique(rv$seu@meta.data[[input$annot_split_meta]]))
+
+      tagList(
+        lapply(clusters, function(cl){
+          fluidRow(
+            column(5, textInput(
+              paste0("label_", cl),
+              label = paste("Cluster", cl, "label"),
+              value = isolate(input[[paste0("label_", cl)]]) %||% cl
+            )),
+            column(5, colourInput(
+              inputId = paste0("color_", cl),
+              label = "Color",
+              value = isolate(input[[paste0("color_", cl)]]) %||% 
+                      rainbow(length(clusters))[which(clusters==cl)],
+              showColour = "both"   # montre couleur + code hex
+            ))
+          )
+        })
+      )
+    })
 
     annot_colors <- reactiveVal(NULL)
 
