@@ -224,7 +224,6 @@ ui <- dashboardPage(
         )
       )
     ),
-
 ### Overview (séparé)
 fluidRow(
   column(12,
@@ -233,20 +232,22 @@ fluidRow(
       tabPanel("Overview",
         fluidRow(
           box(width = 3, status = "info", solidHeader = TRUE,
-              title = "Seurat Object",
-              verbatimTextOutput("seu_summary") %>% withSpinner(),
-              hr(),
-              downloadButton(
-                "download_seurat_rds",
-                "Save SCONE Object (.rds)",
-                icon  = icon("floppy-disk")
-              )
+            title = "Seurat Object",
+            verbatimTextOutput("seu_summary") %>% withSpinner(),
+            hr(),
+            downloadButton(
+              "download_seurat_rds",
+              "Save SCONE Object (.rds)",
+              icon  = icon("floppy-disk")
+            )
           ),
           box(width = 9, status = "info", solidHeader = TRUE,
-              title = "Metadata Table",
-              DT::dataTableOutput("meta_table") %>% withSpinner()
-          ), 
-          box(width = 12,
+            title = "Metadata Table",
+            DT::dataTableOutput("meta_table") %>% withSpinner()
+          )
+        ),
+        fluidRow(
+          box(width = 5,
             title = "Subset by Cell Type",
             status = "info",
             solidHeader = FALSE,
@@ -262,14 +263,56 @@ fluidRow(
             uiOutput("celltype_subset_ui"),
 
             verbatimTextOutput("celltype_subset_summary"),
-             uiOutput("celltype_subset_message") 
+            uiOutput("celltype_subset_message")
+          ),
+
+          box(width = 7,
+            title = "CNV Correction (PCA)",
+            status = "info",
+            solidHeader = FALSE,
+
+            radioButtons(
+              "cnv_correction",
+              "Correct PCA by Copy Number Variation?",
+              choices  = list(
+                "No" = "no",
+                "Yes — recommended for tumoral samples" = "yes"
+              ),
+              selected = "no",
+              inline   = TRUE
+            ),
+
+            conditionalPanel(
+              condition = "input.cnv_correction == 'yes'",
+
+              tags$p(
+                style = "color:#E53935; font-style:italic; margin-top:5px;",
+                "Please select a cell type annotation column, then check the non-tumoral reference cells.
+                 Reference cells should be normal (non-cancerous) cell types such as immune, endothelial, or stromal cells."
+              ),
+
+              uiOutput("cnv_annot_col_ui"),
+              uiOutput("cnv_ref_cells_ui"),
+
+              uiOutput("cnv_download_ui"),
+
+              actionButton(
+                "run_cnv_correction",
+                "Run CNV Correction",
+                icon  = icon("dna"),
+                style = "background:#4CAF50; color:white; margin-top:10px;"
+              ),
+
+              verbatimTextOutput("cnv_correction_summary"),
+              uiOutput("cnv_correction_message"),
+              uiOutput("cnv_correction_message")
+            )
           )
         )
       )
     )
   )
 ),
-
 ### Main Analysis Tabs (QC, UMAP, Violin, DotPlot…)
 fluidRow(
   column(12,
@@ -560,7 +603,7 @@ tabPanel("Annotation (ScType)",
                     # Choix du K pour Monocle3
                     sliderInput(
                       "k_monocle",
-                      label = "Select k for Monocle3 clustering:", min = 2,max = 10, value = 3,step = 1
+                      label = "Select k for Monocle3 clustering:", min = 2,max = 10, value = 5,step = 1
                     ),
                     actionButton(
                       "run_pseudobulk", "Run Pseudobulk Analysis", icon = icon("play-circle"), style = "background:#4CAF50; color:white;"
