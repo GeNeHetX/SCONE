@@ -1,12 +1,16 @@
 ### ---- GLOBAL OPTIONS ----
 options(timeout = 1000)
 options(download.file.method = "libcurl")
+### ---- GLOBAL OPTIONS ----
+options(timeout = 1000)
+options(download.file.method = "libcurl")
 
 cran_packages <- c(
   "shiny", "shinydashboard", "shinycssloaders", "magrittr", "shinyjs",
   "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT",
   "HGNChelper", "igraph", "ggraph", "scCustomize", "dplyr",
-  "circlize", "vegan", "colourpicker", "openxlsx", "tidyr", "tibble"
+  "circlize", "vegan", "colourpicker", "openxlsx", "tidyr", "tibble",
+  "sf", "spdep", "BPCells"
 )
 cran_new <- cran_packages[!(cran_packages %in% installed.packages()[, "Package"])]
 if (length(cran_new)) install.packages(cran_new, dependencies = TRUE)
@@ -19,30 +23,37 @@ if (!"grr" %in% installed.packages()[, "Package"]) {
 }
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-bioc_packages <- c("ComplexHeatmap")
+
+bioc_packages <- c(
+  "ComplexHeatmap", "BiocGenerics", "DelayedArray", "DelayedMatrixStats",
+  "limma", "lme4", "S4Vectors", "SingleCellExperiment", "SummarizedExperiment",
+  "batchelor", "HDF5Array", "terra", "ggrastr"
+)
 bioc_new <- bioc_packages[!(bioc_packages %in% installed.packages()[, "Package"])]
 if (length(bioc_new)) BiocManager::install(bioc_new, ask = FALSE, update = FALSE)
 
+if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+
+# Monocle3 — doit etre installe apres ses dependances Bioc
+if (!requireNamespace("monocle3", quietly = TRUE)) {
+  remotes::install_github("cole-trapnell-lab/monocle3", dependencies = TRUE, upgrade = "never")
+}
+
 github_packages <- c(
   "GeNeHetX/CancerRNASig",
-  "bnprks/BPCells/r",
-  "cole-trapnell-lab/monocle3",
   "immunogenomics/presto",
   "must-bioinfo/fastCNV"
 )
-if (length(github_packages)) {
-  if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
-  
-  for (repo in github_packages) {
-    pkg_name <- basename(repo)  # ex: "CancerRNASig" depuis "GeNeHetX/CancerRNASig"
-    if (!requireNamespace(pkg_name, quietly = TRUE)) {
-      tryCatch(
-        remotes::install_github(repo, dependencies = TRUE, upgrade = "never"),
-        error = function(e) message("Could not install ", repo, ": ", e$message)
-      )
-    } else {
-      message(pkg_name, " already installed — skipping.")
-    }
+
+for (repo in github_packages) {
+  pkg_name <- basename(repo)
+  if (!requireNamespace(pkg_name, quietly = TRUE)) {
+    tryCatch(
+      remotes::install_github(repo, dependencies = TRUE, upgrade = "never"),
+      error = function(e) message("Could not install ", repo, ": ", e$message)
+    )
+  } else {
+    message(pkg_name, " already installed — skipping.")
   }
 }
 
