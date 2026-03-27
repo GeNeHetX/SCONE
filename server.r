@@ -10,7 +10,7 @@ cran_packages <- c(
   "Seurat", "Matrix", "utils", "ggplot2", "gridExtra", "jsonlite", "DT",
   "HGNChelper", "igraph", "ggraph", "scCustomize", "dplyr",
   "circlize", "vegan", "colourpicker", "openxlsx", "tidyr", "tibble",
-  "sf", "spdep", "BPCells"
+  "sf", "spdep"
 )
 cran_new <- cran_packages[!(cran_packages %in% installed.packages()[, "Package"])]
 if (length(cran_new)) install.packages(cran_new, dependencies = TRUE)
@@ -23,7 +23,9 @@ if (!"grr" %in% installed.packages()[, "Package"]) {
 }
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+if (!requireNamespace("remotes",     quietly = TRUE)) install.packages("remotes")
 
+# Bioc packages — ComplexHeatmap + dependances monocle3
 bioc_packages <- c(
   "ComplexHeatmap", "BiocGenerics", "DelayedArray", "DelayedMatrixStats",
   "limma", "lme4", "S4Vectors", "SingleCellExperiment", "SummarizedExperiment",
@@ -32,13 +34,26 @@ bioc_packages <- c(
 bioc_new <- bioc_packages[!(bioc_packages %in% installed.packages()[, "Package"])]
 if (length(bioc_new)) BiocManager::install(bioc_new, ask = FALSE, update = FALSE)
 
-if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
-
-# Monocle3 — doit etre installe apres ses dependances Bioc
-if (!requireNamespace("monocle3", quietly = TRUE)) {
-  remotes::install_github("cole-trapnell-lab/monocle3", dependencies = TRUE, upgrade = "never")
+# BPCells — necessite HDF5 installe sur le systeme
+# Linux : sudo apt-get install libhdf5-dev
+# Mac   : brew install hdf5
+# Windows : installer Rtools avant
+if (!requireNamespace("BPCells", quietly = TRUE)) {
+  tryCatch(
+    remotes::install_github("bnprks/BPCells/r", dependencies = TRUE, upgrade = "never"),
+    error = function(e) message("Could not install BPCells — make sure HDF5 is installed: ", e$message)
+  )
 }
 
+# Monocle3 — apres BPCells et dependances Bioc
+if (!requireNamespace("monocle3", quietly = TRUE)) {
+  tryCatch(
+    remotes::install_github("cole-trapnell-lab/monocle3", dependencies = TRUE, upgrade = "never"),
+    error = function(e) message("Could not install monocle3: ", e$message)
+  )
+}
+
+# Autres packages GitHub
 github_packages <- c(
   "GeNeHetX/CancerRNASig",
   "immunogenomics/presto",
