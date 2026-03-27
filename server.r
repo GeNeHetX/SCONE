@@ -701,7 +701,7 @@ server <- function(input, output, session) {
 
       # ── 1. fastCNV per sample ────────────────────────────────────────────
       append_log("Step 1: Running fastCNV per sample...")
-
+      incProgress(0.1)
       save_path <- file.path(tempdir(), paste0("CNV_", format(Sys.time(), "%Y%m%d_%H%M%S")))
       dir.create(save_path, recursive = TRUE, showWarnings = FALSE)
       append_log(paste("CNV outputs will be saved to:", save_path))
@@ -802,12 +802,25 @@ server <- function(input, output, session) {
         FindClusters(resolution = input$resolution, verbose = FALSE) |>
         RunUMAP(reduction = "pca_cnv_corrected", dims = 1:input$n_pcs,
                 reduction.name = "umap_cnv_corrected", verbose = FALSE)
+
+      # Sauvegarder le FeaturePlot cnv_fraction en PDF
+      if ("cnv_fraction" %in% colnames(seu@meta.data)) {
+        p_cnv <- FeaturePlot(seu, features = "cnv_fraction",
+          reduction = "umap_cnv_corrected", pt.size = 1) +
+          ggtitle("Copy Number Variation Fraction on umap_cnv_corrected")
+
+        pdf(file.path(save_path, "cnv_fraction_umap.pdf"), width = 10, height = 8)
+        print(p_cnv)
+        dev.off()
+        append_log("CNV fraction UMAP saved as PDF.")
+      }
+
       incProgress(0.9)
 
       rv$seu          <- seu
       rv$seu          <- seu
       rv$meta_choices <- sort(grep(
-        "sampleID|^published|sctype_|manual_|cnv_fraction|^(louvain_|kmeans_|leiden_)",
+        "sampleID|^published|sctype_|manual_|^(louvain_|kmeans_|leiden_)",
         names(seu@meta.data), value = TRUE
       ))
       cnv_correction_done(TRUE)
@@ -823,7 +836,6 @@ server <- function(input, output, session) {
         cat("Transcriptomic PCs corrected:", input$n_pcs, "\n")
         cat("New reduction: pca_cnv_corrected\n")
         cat("New UMAP: umap_cnv_corrected\n")
-        cat("Metadata kept: cnv_fraction only\n")
       })
     })
   })
@@ -834,25 +846,6 @@ server <- function(input, output, session) {
       style = "margin-left:10px; font-style:italic; color:#666;")
   })
 
-  output$cnv_feature_plot_ui <- renderUI({
-  req(cnv_correction_done())
-  req("cnv_fraction" %in% colnames(rv$seu@meta.data))
-  tagList(
-    hr(),
-    h4("CNV Fraction per cell"),
-    plotOutput("cnv_fraction_plot", height = "500px") %>% withSpinner()
-  )
-})
-
-output$cnv_fraction_plot <- renderPlot({
-  req(rv$seu)
-  req(cnv_correction_done())
-  req("cnv_fraction" %in% colnames(rv$seu@meta.data))
-  red <- get_umap_reduction(rv$seu)
-  FeaturePlot(rv$seu, features = "cnv_fraction", reduction = red, pt.size = 1) +
-    scale_color_viridis_c(option = "C") +
-    ggtitle("CNV Fraction")
-})
 
 output$download_cnv_results <- downloadHandler(
   filename = function() paste0("CNV_results_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".zip"),
@@ -923,7 +916,7 @@ output$cnv_download_ui <- renderUI({
 
       rv$seu          <- seu
       rv$meta_choices <- sort(grep(
-          "sampleID|^published|sctype_|manual_|cnv_fraction|^(louvain_|kmeans_|leiden_)",
+          "sampleID|^published|sctype_|manual_|^(louvain_|kmeans_|leiden_)",
           names(seu@meta.data), value = TRUE
         ))
       append_log(paste("Analysis completed:", cluster_name))
