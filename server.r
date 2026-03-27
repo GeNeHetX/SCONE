@@ -57,7 +57,9 @@ if (!requireNamespace("monocle3", quietly = TRUE)) {
 github_packages <- c(
   "GeNeHetX/CancerRNASig",
   "immunogenomics/presto",
-  "must-bioinfo/fastCNV"
+  'satijalab/seurat-wrappers',
+  "must-bioinfo/fastCNV", 
+  
 )
 
 for (repo in github_packages) {
