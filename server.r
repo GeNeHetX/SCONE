@@ -58,7 +58,7 @@ github_packages <- c(
   "GeNeHetX/CancerRNASig",
   "immunogenomics/presto",
   'satijalab/seurat-wrappers',
-  "must-bioinfo/fastCNV", 
+  "must-bioinfo/fastCNV"
   
 )
 
